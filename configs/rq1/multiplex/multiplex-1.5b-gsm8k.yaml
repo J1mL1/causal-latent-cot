@@ -1,0 +1,30 @@
+model:
+  device: "cuda"
+  model_name_or_path: "models/Multiplex-Thinking-1.5B"
+  tokenizer_name_or_path: "models/Multiplex-Thinking-1.5B"
+  max_think_steps: 2000
+  max_answer_tokens: 256
+  temperature_think: 1.0
+  top_k_think: 0
+  top_p_think: 1.0
+  min_p_think: 0.0
+  multiplex_width: 3
+  enable_unweighting: false
+  enable_replacement: false
+  enable_gumbel: false
+  gumbel_tau: 1.0
+  dirichlet_alpha: 0.0
+  cold_stop_entropy: 0.1
+  cold_stop_len: 256
+  think_end_str: "</think>"
+  do_sample_answer: false
+  temperature_answer: 0.0
+  top_k_answer: 40
+  top_p_answer: 0.95
+  teacher_target_template: "The answer is: {answer}"
+
+dataset_name: gsm8k
+dataset_path: "data/gsm8k_local.jsonl"
+prompt_template: "Question: {question}\nAnswer:"
+steps: "1,2,3,4,5,6"
+max_mean_steps: 6

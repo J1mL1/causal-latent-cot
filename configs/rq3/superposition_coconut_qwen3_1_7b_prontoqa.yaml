@@ -1,0 +1,38 @@
+model_name: "coconut"
+model:
+  device: "cuda"
+  base_model_name_or_path: "${MODEL_DIR}/Qwen3-1.7B"
+  tokenizer_name_or_path: "${MODEL_DIR}/Qwen3-1.7B"
+  checkpoint_path: "${PROJECT_ROOT}/models/coconut_reproduction/prontoqa-coconut-qwen1.7b/checkpoint_10"
+  add_latent_tokens: true
+  start_latent_token_str: "<|start-latent|>"
+  end_latent_token_str: "<|end-latent|>"
+  latent_token_str: "<|latent|>"
+  latent_init_token: "<<"
+  num_latent_placeholders: 6
+  teacher_target_template: "### {answer}"
+  use_coconut_question_only: true
+  align_latent_padding: true
+generation_kwargs:
+  max_new_tokens: 64
+  temperature: 1.0
+dataset_name: prontoqa
+dataset_path: "data/protoqa_local.jsonl"
+prompt_template: "{question}\nAnswer:"
+steps: "1,2,3,4,5,6"
+max_mean_steps: 6
+
+rq3:
+  temperature: 0.7
+  num_samples: 40
+  max_new_tokens: 64
+  ambiguity_min_cover: 0.8
+  ambiguity_min_ratio: 0.2
+  ambiguity_max_ratio: 0.8
+  activity_epsilon: 0.02
+  probe_step: "final"
+  early_steps: [2, 3]
+  late_step: "final"
+  ablate_step: 2
+  ablate_lambda: 1.0
+  orthogonalize: "gram_schmidt"

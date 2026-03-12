@@ -1,0 +1,53 @@
+model_name: "codi"
+model:
+  device: "cuda"
+  model_args:
+    model_name_or_path: "models/gpt2"
+    ckpt_dir: "models/codi_reproduction/strategyqa_codi_gpt2"
+    lora_r: 128
+    lora_alpha: 32
+    lora_dropout: 0.1
+    full_precision: true
+    token: null
+  training_args:
+    num_latent: 6
+    inf_latent_iterations: 6
+    use_lora: true
+    use_prj: true
+    prj_dim: 768
+    prj_dropout: 0.0
+    prj_no_ln: false
+    remove_eos: true
+    greedy: false
+    output_dir: "./outputs/codi_gpt2"
+    per_device_train_batch_size: 128
+    per_device_eval_batch_size: 128
+    bf16: false
+  tokenizer_name_or_path: "models/gpt2"
+  generation_kwargs:
+    max_new_tokens: 256
+    temperature: 0.7
+    top_k: 40
+    top_p: 0.95
+    greedy: false
+  teacher_target_template: "The answer is: {answer}"
+dataset_name: strategyqa
+dataset_path: "data/strategyqa_local.jsonl"
+prompt_template: "{question}\nAnswer:"
+steps: "1,2,3,4,5,6"
+max_mean_steps: 6
+
+rq3:
+  temperature: 0.7
+  num_samples: 40
+  max_new_tokens: 128
+  ambiguity_min_cover: 0.8
+  ambiguity_min_ratio: 0.2
+  ambiguity_max_ratio: 0.8
+  activity_epsilon: 0.02
+  probe_step: "final"
+  early_steps: [2, 3]
+  late_step: "final"
+  ablate_step: 2
+  ablate_lambda: 1.0
+  orthogonalize: "gram_schmidt"

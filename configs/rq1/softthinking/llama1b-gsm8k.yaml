@@ -1,0 +1,28 @@
+model:
+  device: "cuda"
+  model_name_or_path: "${MODEL_DIR}/Llama-3.2-1B-Instruct"
+  tokenizer_name_or_path: "${MODEL_DIR}/Llama-3.2-1B-Instruct"
+  max_think_steps: 32
+  max_answer_tokens: 64
+  temperature_think: 0.6
+  top_k_think: 30
+  top_p_think: 0.95
+  concept_top_n: 15
+  cold_stop_entropy: 0.1
+  cold_stop_len: 256
+  think_end_str: "</think>"
+  do_sample_answer: false
+  temperature_answer: 0.0
+  top_k_answer: 30
+  top_p_answer: 0.95
+  teacher_target_template: "### {answer}"
+
+dataset_name: gsm8k
+dataset_path: "data/gsm8k_local.jsonl"
+prompt_template: |
+  You are a helpful math assistant. Solve the problem and output only the final answer in the form "### {answer}".
+
+  Question: {question}
+  Answer:
+steps: "1,2,3,4,5,6"
+max_mean_steps: 6

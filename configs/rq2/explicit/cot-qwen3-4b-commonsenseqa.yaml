@@ -1,0 +1,10 @@
+model:
+  model_name_or_path: "${MODEL_DIR}/Qwen3-4B-Instruct-2507"
+  tokenizer_name_or_path: "${MODEL_DIR}/Qwen3-4B-Instruct-2507"
+model_type: hf-auto
+generation_kwargs: {}
+dataset_name: commonsenseqa
+dataset_path: "data/commonsenseqa_cot_train_steps_1k.jsonl"
+dataset_split: test
+prompt_template: "{question}\nAnswer:"
+use_chat_template: false

@@ -1,0 +1,11 @@
+model:
+  model_name_or_path: "${MODEL_DIR}/Llama-3.2-1B-Instruct"
+  tokenizer_name_or_path: "${MODEL_DIR}/Llama-3.2-1B-Instruct"
+  checkpoint_path: "${PROJECT_ROOT}/models/coconut_reproduction/gsm-cot-llama3.2-1b-instruct/checkpoint_5"
+model_type: hf-auto
+generation_kwargs: {}
+dataset_name: gsm8k-aug
+dataset_path: datasets/GSM8k-Aug
+dataset_split: test
+prompt_template: "Question: {question}\nAnswer:"
+use_chat_template: false

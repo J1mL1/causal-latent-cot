@@ -1,0 +1,37 @@
+model:
+  device: "cuda"
+  model_args:
+    model_name_or_path: "${MODEL_DIR}/Llama-3.2-1B-Instruct"       
+    ckpt_dir: "models/CODI-llama3.2-1b-Instruct"
+    lora_r: 128
+    lora_alpha: 32
+    lora_dropout: 0.1
+    full_precision: true
+    token: null
+  training_args:
+    num_latent: 6
+    inf_latent_iterations: 6
+    use_lora: true
+    use_prj: true
+    prj_dim: 2048
+    prj_dropout: 0.0
+    prj_no_ln: false
+    remove_eos: true
+    greedy: true
+    output_dir: "./outputs/codi_llama"
+    per_device_train_batch_size: 128
+    per_device_eval_batch_size: 128
+    bf16: false
+  tokenizer_name_or_path: "${MODEL_DIR}/Llama-3.2-1B-Instruct"
+  generation_kwargs:
+    max_new_tokens: 256
+    temperature: 0.1
+    top_k: 40
+    top_p: 0.95
+    greedy: true
+  teacher_target_template: "The answer is: {answer}"
+dataset_name: null
+dataset_path: "data/gsm8k_local.jsonl"
+prompt_template: "Question: {question}\nAnswer:"
+steps: "1,2,3,4,5,6"
+max_mean_steps: 3

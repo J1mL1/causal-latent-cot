@@ -1,0 +1,23 @@
+model:
+  device: "cuda"
+  base_model_name_or_path: "${MODEL_DIR}/Qwen3-8B"   # base config/tokenizer
+  tokenizer_name_or_path: "${MODEL_DIR}/Qwen3-8B"
+  checkpoint_path: "${PROJECT_ROOT}/models/coconut_reproduction/gsm-coconut-Qwen3-8B/checkpoint_4"
+  add_latent_tokens: true
+  # Coconut training adds three special tokens in order: <|start-latent|>, <|end-latent|>, <|latent|>.
+  start_latent_token_str: "<|start-latent|>"
+  end_latent_token_str: "<|end-latent|>"
+  latent_token_str: "<|latent|>"
+  latent_init_token: "<<"   # match official init source token
+  num_latent_placeholders: 6   # c_thought=2, max_latent_stage=3 -> 6 latent slots
+  teacher_target_template: "### {answer}"
+  use_coconut_question_only: true
+  align_latent_padding: true
+generation_kwargs:
+  max_new_tokens: 64        # align with original coconut.generate default (16) but allow longer
+  temperature: 1.0          # coconut.generate is greedy; temperature is unused
+dataset_name: gsm8k
+dataset_path: "data/gsm8k_local.jsonl"
+prompt_template: "Question: {question}\nAnswer:"
+steps: "1,2,3,4,5,6"
+max_mean_steps: 6
