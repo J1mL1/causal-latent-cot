@@ -145,8 +145,6 @@ Example:
 bash scripts/plot/r/rq2/plot_explicit_graph_grid.sh
 ```
 
-Release guidance is documented in [docs/publication_checklist.md](docs/publication_checklist.md).
-
 ## Reproducibility Notes
 
 - many experiments depend on local model checkpoints that are not distributed in this repository
