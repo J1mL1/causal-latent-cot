@@ -44,7 +44,7 @@ else
   DIST_FLAGS=""
 fi
 
-${LAUNCHER} --master_port 29556 experiments/rq2/run_latent_causal_graph.py \
+${LAUNCHER} experiments/rq2/run_latent_causal_graph.py \
   --model_name codi \
   --config_path "${CONFIG}" \
   --output_path "${OUTPUT}" \

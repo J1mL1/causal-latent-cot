@@ -19,7 +19,7 @@ class CoconutWrapper(LatentReasoningModel):
 
     The wrapper follows the iterative latent filling scheme from `external/coconut/coconut.py`.
     At `forward_until_step`, latents before the requested step are materialized and cached,
-    while the target step is returned for ablation without being injected yet.
+    while the target step is returned for intervention without being injected yet.
     """
 
     def __init__(self) -> None:
@@ -37,10 +37,24 @@ class CoconutWrapper(LatentReasoningModel):
         self.align_latent_padding: bool = False
 
     def _ensure_cache(self, past_key_values: Any) -> Any:
-        """Convert legacy tuple/list caches to the new HF Cache interface."""
+        """Convert legacy tuple/list caches to the HF Cache interface."""
         if past_key_values is None or hasattr(past_key_values, "get_seq_length"):
             return past_key_values
-        return DynamicCache.from_legacy_cache(past_key_values)
+        if hasattr(DynamicCache, "from_legacy_cache"):
+            return DynamicCache.from_legacy_cache(past_key_values)
+        # transformers 5.3+: from_legacy_cache removed; use ddp_cache_data=(k,v) per layer
+        return DynamicCache(ddp_cache_data=past_key_values)
+
+    def _kv_cache_to_legacy_pairs(self, past_key_values: Any) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+        """Per-layer (k, v) for slicing."""
+        if past_key_values is None:
+            return []
+        if hasattr(past_key_values, "to_legacy_cache"):
+            return list(past_key_values.to_legacy_cache())
+        # transformers 5.3+: DynamicCache.__iter__ yields (k, v, sliding_window_tensor) — not 2-tuples
+        if hasattr(past_key_values, "layers"):
+            return [(layer.keys, layer.values) for layer in past_key_values.layers]
+        return list(past_key_values)
 
     def load_from_config(self, config: Dict[str, Any]) -> None:
         base_path = config.get("base_model_name_or_path") or config.get(
@@ -54,7 +68,7 @@ class CoconutWrapper(LatentReasoningModel):
         self.base_model = AutoModelForCausalLM.from_pretrained(
             base_path, trust_remote_code=True
         ).to(self.device)
-        # Disable dropout for reproducible logits during teacher-forcing/ablations.
+        # Disable dropout for reproducible logits during teacher-forcing/interventions.
         self.base_model.eval()
         self.tokenizer = AutoTokenizer.from_pretrained(
             tokenizer_name, trust_remote_code=True
@@ -493,7 +507,7 @@ class CoconutWrapper(LatentReasoningModel):
                             k[:, :, : next_compute_range[0], :],
                             v[:, :, : next_compute_range[0], :],
                         )
-                        for k, v in past_key_values
+                        for k, v in self._kv_cache_to_legacy_pairs(past_key_values)
                     ]
                 )
                 outputs = self.base_model(
@@ -729,7 +743,7 @@ class CoconutWrapper(LatentReasoningModel):
                                 k[:, :, : next_compute_range_local[0], :],
                                 v[:, :, : next_compute_range_local[0], :],
                             )
-                            for k, v in past_key_values_local
+                            for k, v in self._kv_cache_to_legacy_pairs(past_key_values_local)
                         ]
                     )
                     with torch.set_grad_enabled(allow_grad):
@@ -788,7 +802,7 @@ class CoconutWrapper(LatentReasoningModel):
                                         k[:, :, : next_compute_range_local[0], :],
                                         v[:, :, : next_compute_range_local[0], :],
                                     )
-                                    for k, v in past_key_values_local
+                                    for k, v in self._kv_cache_to_legacy_pairs(past_key_values_local)
                                 ]
                             )
                             if past_key_values_local
@@ -810,7 +824,7 @@ class CoconutWrapper(LatentReasoningModel):
                 "past_key_values": past_key_values_local,
             }
 
-        # If no latent tokens were present, ablation is identical to baseline.
+        # If no latent tokens were present, intervention is identical to baseline.
         if other_state.get("no_latent"):
             return self.run_baseline(other_state.get("tokens", {}))
         if other_state.get("per_sample_states"):
@@ -944,7 +958,7 @@ class CoconutWrapper(LatentReasoningModel):
                 f"Invalid pass_idx {pass_idx} for max_n_latents={max_n_latents}"
             )
 
-        # Fill the ablated latent for the current step.
+        # Fill the intervened latent for the current step.
         filling_indices = [
             (instance_idx, mask_list[pass_idx])
             for instance_idx, mask_list in enumerate(latent_lists)
@@ -985,7 +999,7 @@ class CoconutWrapper(LatentReasoningModel):
                             k[:, :, : next_compute_range[0], :],
                             v[:, :, : next_compute_range[0], :],
                         )
-                        for k, v in past_key_values
+                        for k, v in self._kv_cache_to_legacy_pairs(past_key_values)
                     ]
                 )
                 with torch.set_grad_enabled(allow_grad):
@@ -1046,7 +1060,7 @@ class CoconutWrapper(LatentReasoningModel):
                                     k[:, :, : next_compute_range[0], :],
                                     v[:, :, : next_compute_range[0], :],
                                 )
-                                for k, v in past_key_values
+                                for k, v in self._kv_cache_to_legacy_pairs(past_key_values)
                             ]
                         )
                         if past_key_values
@@ -1138,7 +1152,7 @@ class CoconutWrapper(LatentReasoningModel):
         if target_step <= pass_idx:
             return h_t_modified, other_state
 
-        # Fill the ablated latent for the current step.
+        # Fill the intervened latent for the current step.
         filling_indices = [
             (instance_idx, mask_list[pass_idx])
             for instance_idx, mask_list in enumerate(latent_lists)
@@ -1175,7 +1189,7 @@ class CoconutWrapper(LatentReasoningModel):
                             k[:, :, : next_compute_range[0], :],
                             v[:, :, : next_compute_range[0], :],
                         )
-                        for k, v in past_key_values
+                        for k, v in self._kv_cache_to_legacy_pairs(past_key_values)
                     ]
                 )
                 with torch.set_grad_enabled(allow_grad):
@@ -1328,7 +1342,7 @@ class CoconutWrapper(LatentReasoningModel):
                                 k[:, :, : next_compute_range[0], :],
                                 v[:, :, : next_compute_range[0], :],
                             )
-                            for k, v in past_key_values
+                            for k, v in self._kv_cache_to_legacy_pairs(past_key_values)
                         ]
                     )
                     if past_key_values

@@ -1,5 +1,5 @@
 """
-Utility to dump GSM8K (or similar) into a local JSONL file the ablation runner can read.
+Utility to dump GSM8K (or similar) into a local JSONL file the intervention runner can read.
 
 Usage:
   python data/prepare_gsm8k_jsonl.py --split test --subset main --out data/gsm8k_local.jsonl

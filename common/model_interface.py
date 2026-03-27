@@ -45,7 +45,7 @@ class LatentReasoningModel(ABC):
         Continue the forward pass starting from a modified latent.
 
         Args:
-            h_t_modified: Tensor of shape [batch, d_model] after ablation.
+            h_t_modified: Tensor of shape [batch, d_model] after intervention.
             other_state: Cached tensors returned by forward_until_step.
         """
 
@@ -57,7 +57,7 @@ class LatentReasoningModel(ABC):
         Continue the forward pass from the modified latent up to target_step without decoding.
 
         Args:
-            h_t_modified: Tensor of shape [batch, d_model] after ablation.
+            h_t_modified: Tensor of shape [batch, d_model] after intervention.
             other_state: Cached tensors returned by forward_until_step.
             target_step: Target latent/token index to reach (1-based for latents).
         """

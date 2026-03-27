@@ -1,6 +1,6 @@
 """
 Utility to dump ProntoQA JSON into a local JSONL file with fields
-compatible with the ablation runner: {"question","answer","steps","id"}.
+compatible with the intervention runner: {"question","answer","steps","id"}.
 
 Usage:
   python data/prepare_prontoqa_jsonl.py \

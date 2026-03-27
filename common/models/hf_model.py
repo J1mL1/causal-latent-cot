@@ -108,7 +108,7 @@ class HFAutoregressiveModel(LatentReasoningModel):
         inputs_embeds = inputs_embeds.to(self.device)
         if step_idx < 0 or step_idx >= inputs_embeds.size(1):
             raise ValueError(f"Invalid step_idx {step_idx} for sequence length {inputs_embeds.size(1)}")
-        # Replace the embedding for the target position with the ablated latent.
+        # Replace the embedding for the target position with the intervened latent.
         inputs_embeds[:, step_idx, :] = h_t_modified.to(self.device)
         with torch.set_grad_enabled(allow_grad):
             outputs = self.model(

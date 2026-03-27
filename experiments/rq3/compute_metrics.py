@@ -159,7 +159,7 @@ def main() -> None:
         afr_total += 1
         if rec.get("flip_to_B"):
             afr_flip += 1
-        step = rec.get("ablate_step")
+        step = rec.get("intervene_step")
         mode = rec.get("mode", "all")
         if isinstance(step, int):
             afr_by_step.setdefault(step, [0, 0])

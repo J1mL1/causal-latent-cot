@@ -182,7 +182,7 @@ def main() -> None:
                 target_error = None
                 if do_logit_teacher and hasattr(model, "compute_logits") and target_answer:
                     try:
-                        # target_answer 已经过 parse_answer 处理过，这里不再重复 gsm8k 解析。
+                        # target_answer was already parsed by parse_answer; skip duplicate GSM8K parsing here.
                         target_ids = prepare_target_ids(model, target_answer, use_gsm8k_parse=False)
                     except Exception as exc:
                         target_ids = None

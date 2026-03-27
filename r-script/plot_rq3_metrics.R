@@ -66,14 +66,14 @@ if (nrow(df_afr) > 0) {
     p_afr <- ggplot(df_afr, aes(x = step, y = mean, color = phase)) +
       geom_line(linewidth = 0.9) +
       geom_point(size = 2) +
-      labs(x = "step", y = "AFR", title = "AFR by Ablation Step", color = NULL) +
+      labs(x = "step", y = "AFR", title = "AFR by Intervention Step", color = NULL) +
       theme_minimal(base_size = 12) +
       theme(panel.grid = element_blank(), legend.position = "bottom")
   } else {
     p_afr <- ggplot(df_afr, aes(x = step, y = mean)) +
       geom_line(linewidth = 0.9, color = "#2ca02c") +
       geom_point(size = 2, color = "#2ca02c") +
-      labs(x = "step", y = "AFR", title = "AFR by Ablation Step") +
+      labs(x = "step", y = "AFR", title = "AFR by Intervention Step") +
       theme_minimal(base_size = 12) +
       theme(panel.grid = element_blank())
   }

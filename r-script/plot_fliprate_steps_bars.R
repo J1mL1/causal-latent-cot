@@ -15,7 +15,7 @@ script_dir <- if (length(script_path) > 0 && nzchar(script_path)) {
 } else {
   normalizePath(".")
 }
-source(file.path(script_dir, "ablation_parse_utils.R"))
+source(file.path(script_dir, "intervention_parse_utils.R"))
 
 compute_flip_stats <- function(path, label, mode_name = "zero") {
   df <- read_jsonl_df(path)
@@ -30,8 +30,8 @@ compute_flip_stats <- function(path, label, mode_name = "zero") {
         b_list <- to_list_col(baseline, nrow(df))
         vapply(seq_len(nrow(df)), function(i) get_text_field(b_list[[i]], batch_idx[[i]]), character(1))
       },
-      ablated_text = {
-        a_list <- to_list_col(ablated, nrow(df))
+      intervened_text = {
+        a_list <- to_list_col(intervened, nrow(df))
         vapply(seq_len(nrow(df)), function(i) get_text_field(a_list[[i]], batch_idx[[i]]), character(1))
       },
       gold_is_choice = grepl("^[A-E]$", as.character(gold_answer)),
@@ -39,29 +39,29 @@ compute_flip_stats <- function(path, label, mode_name = "zero") {
       gold_choice = ifelse(gold_is_choice, as.character(gold_answer), NA_character_),
       gold_num = ifelse(!gold_is_choice, suppressWarnings(as.numeric(gold)), NA_real_),
       baseline_choice = sapply(baseline_text, extract_choice),
-      ablated_choice = sapply(ablated_text, extract_choice),
+      intervened_choice = sapply(intervened_text, extract_choice),
       baseline_num = sapply(baseline_text, extract_number),
-      ablated_num = sapply(ablated_text, extract_number),
+      intervened_num = sapply(intervened_text, extract_number),
       baseline_correct = ifelse(
         gold_is_choice,
         !is.na(baseline_choice) & !is.na(gold_choice) & baseline_choice == gold_choice,
         !is.na(baseline_num) & !is.na(gold_num) & abs(baseline_num - gold_num) < 1e-6
       ),
-      ablated_correct = ifelse(
+      intervened_correct = ifelse(
         gold_is_choice,
-        !is.na(ablated_choice) & !is.na(gold_choice) & ablated_choice == gold_choice,
-        !is.na(ablated_num) & !is.na(gold_num) & abs(ablated_num - gold_num) < 1e-6
+        !is.na(intervened_choice) & !is.na(gold_choice) & intervened_choice == gold_choice,
+        !is.na(intervened_num) & !is.na(gold_num) & abs(intervened_num - gold_num) < 1e-6
       )
     )
 
   df_mode <- df %>% filter(mode == mode_name, !is.na(step_i), step_i >= 1, step_i <= 6)
 
   flip_tbl <- df_mode %>%
-    filter(!is.na(baseline_correct), !is.na(ablated_correct)) %>%
+    filter(!is.na(baseline_correct), !is.na(intervened_correct)) %>%
     group_by(step_i) %>%
     summarise(
       n = n(),
-      flip_rate = mean(baseline_correct != ablated_correct),
+      flip_rate = mean(baseline_correct != intervened_correct),
       se = ifelse(n > 0, sqrt(flip_rate * (1 - flip_rate) / n), NA_real_),
       .groups = "drop"
     ) %>%
@@ -75,7 +75,7 @@ compute_flip_stats <- function(path, label, mode_name = "zero") {
 }
 
 parse_args <- function(args) {
-  opts <- list(csqa = list(), gsm8k = list(), out_dir = NULL, file_stub = "fliprate_step_ablation", mode = "zero")
+  opts <- list(csqa = list(), gsm8k = list(), out_dir = NULL, file_stub = "fliprate_step_intervention", mode = "zero")
   i <- 1
   while (i <= length(args)) {
     key <- args[[i]]

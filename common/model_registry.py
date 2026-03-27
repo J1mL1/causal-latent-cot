@@ -13,6 +13,8 @@ MODEL_IMPORT_PATHS: Dict[str, str] = {
     "hf-auto": "common.models.hf_model:HFAutoregressiveModel",
     "coconut": "common.models.coconut_model:CoconutWrapper",
     "codi": "common.models.codi_model:CodiWrapper",
+    "simcot-coconut": "common.models.simcot_coconut_model:SimCoconutGPTWrapper",
+    "simcot-codi": "common.models.simcot_codi_model:SimCodiWrapper",
     "softthinking": "common.models.softthinking_model:SoftThinkingWrapper",
     "multiplex": "common.models.multiplex_model:MultiplexThinkingWrapper",
 }
@@ -33,7 +35,8 @@ def load_model(model_name: str, config: Dict[str, Any]) -> LatentReasoningModel:
     Factory that instantiates a registered model and loads it from config.
 
     Args:
-        model_name: Identifier such as 'coconut', 'codi', 'hf-auto', 'softthinking', or 'multiplex'.
+        model_name: Identifier such as 'coconut', 'codi', 'simcot-coconut', 'simcot-codi',
+            'hf-auto', 'softthinking', or 'multiplex'.
         config: Model-specific configuration dictionary.
     """
     normalized = model_name.lower()

@@ -277,7 +277,7 @@ class SoftThinkingWrapper(LatentReasoningModel):
             if think_stop_step is None:
                 remaining = max(self.cfg.max_think_steps - start_step, 0)
             else:
-                # Align ablation to the baseline think length; avoid injecting extra latents.
+                # Align intervention to the baseline think length; avoid injecting extra latents.
                 remaining = max(int(think_stop_step) - start_step, 0)
             low_entropy_steps = torch.zeros(
                 attention_mask.size(0), dtype=torch.long, device=self.device
@@ -533,7 +533,7 @@ class SoftThinkingWrapper(LatentReasoningModel):
         low_entropy_steps = 0
         think_end_single = len(self.think_end_ids) == 1
         think_end_id = self.think_end_ids[0] if think_end_single else None
-        # Track completed latent steps for ablation length alignment.
+        # Track completed latent steps for intervention length alignment.
         think_steps_done = 0
 
         for _ in range(self.cfg.max_think_steps):

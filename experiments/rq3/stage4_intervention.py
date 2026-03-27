@@ -126,15 +126,15 @@ def main() -> None:
     parser.add_argument("--probes_jsonl", required=True)
     parser.add_argument("--traj_jsonl", default=None, help="Required for counterfactual mode.")
     parser.add_argument("--output_jsonl", required=True)
-    parser.add_argument("--ablate_step", type=int, default=2)
-    parser.add_argument("--ablate_steps", default=None, help="Comma-separated list of steps (e.g., 1,2,3).")
+    parser.add_argument("--intervene_step", type=int, default=2)
+    parser.add_argument("--intervene_steps", default=None, help="Comma-separated list of steps (e.g., 1,2,3).")
     parser.add_argument("--lambda_scale", type=float, default=1.0)
     parser.add_argument("--modes", default="probe", help="Comma-separated list: probe,counterfactual")
     parser.add_argument(
         "--grad_metric",
         default=None,
         choices=["grad_logprob", "grad_margin"],
-        help="Optional gradient sensitivity metric to log per ablated step.",
+        help="Optional gradient sensitivity metric to log per intervened step.",
     )
     parser.add_argument(
         "--model_type",
@@ -171,9 +171,9 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     dataset_name = str(config.get("dataset_name", ""))
-    ablate_steps = [args.ablate_step]
-    if args.ablate_steps:
-        ablate_steps = [int(s) for s in args.ablate_steps.split(",") if s.strip() != ""]
+    intervene_steps = [args.intervene_step]
+    if args.intervene_steps:
+        intervene_steps = [int(s) for s in args.intervene_steps.split(",") if s.strip() != ""]
     modes = [m.strip() for m in str(args.modes).split(",") if m.strip()]
     if not modes:
         modes = ["probe"]
@@ -183,7 +183,7 @@ def main() -> None:
         if args.traj_jsonl is None:
             raise ValueError("--traj_jsonl is required for counterfactual mode.")
         trajs = load_jsonl(Path(args.traj_jsonl))
-        cf_means = build_counterfactual_means(trajs, samples, ablate_steps)
+        cf_means = build_counterfactual_means(trajs, samples, intervene_steps)
 
     use_grad_metric = args.grad_metric is not None
     grad_context = torch.enable_grad() if use_grad_metric else torch.no_grad()
@@ -208,7 +208,7 @@ def main() -> None:
             if target_ids is not None and target_ids.dim() == 1:
                 target_ids = target_ids.unsqueeze(0)
 
-            for step in ablate_steps:
+            for step in intervene_steps:
                 grad_value = None
                 if use_grad_metric and target_ids is not None:
                     grad_metric = "gold_logprob" if args.grad_metric == "grad_logprob" else "margin"
@@ -278,7 +278,7 @@ def main() -> None:
                         json.dumps(
                             {
                                 "sample_id": sid,
-                                "ablate_step": step,
+                                "intervene_step": step,
                                 "lambda": args.lambda_scale,
                                 "mode": mode,
                                 "counterfactual_cluster": cf_cluster,

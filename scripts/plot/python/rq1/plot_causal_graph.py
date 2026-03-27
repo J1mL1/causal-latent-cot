@@ -250,8 +250,8 @@ def main() -> None:
     heat_path = out_dir / (in_path.stem + ".heatmap.png")
     label = {
         "kl_mean": "KL mean",
-        "delta_logp_final_token": "Δ log p(final token)",
-        "teacher_forced_delta_sum": "Δ log p(sequence)",
+        "delta_logp_final_token": "Δ log p(final token) (int−base)",
+        "teacher_forced_delta_sum": "Δ log p(sequence) (int−base)",
     }.get(args.edge_metric, args.edge_metric)
     plot_heatmap(M, heat_path, label=label)
 

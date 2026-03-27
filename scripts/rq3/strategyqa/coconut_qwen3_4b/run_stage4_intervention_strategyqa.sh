@@ -27,5 +27,5 @@ python experiments/rq3/stage4_intervention.py \
   --traj_jsonl "${INPUT_DIR}/ambiguous_trajectories.jsonl" \
   --modes "probe,counterfactual" \
   --output_jsonl "${OUT_JSONL}" \
-  --ablate_steps 1,2,3,4,5,6 \
+  --intervene_steps 1,2,3,4,5,6 \
   --lambda_scale 1.0

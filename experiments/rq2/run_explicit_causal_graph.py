@@ -382,8 +382,8 @@ def main() -> None:
                             continue
                         base_stats = _compute_logp_stats(base_logp, base_ids)
                         ablt_stats = _compute_logp_stats(ablt_logp, ablt_ids)
-                        delta_seq = base_stats["logp_seq"] - ablt_stats["logp_seq"]
-                        delta_last = base_stats["logp_last"] - ablt_stats["logp_last"]
+                        delta_seq = ablt_stats["logp_seq"] - base_stats["logp_seq"]
+                        delta_last = ablt_stats["logp_last"] - base_stats["logp_last"]
                         kl_mean = _compute_kl_mean(base_logp, ablt_logp)
                         kl_last_token = _compute_kl_last_token(base_logp, ablt_logp)
                         hidden_kl = (
@@ -469,8 +469,8 @@ def main() -> None:
                                 continue
                             base_stats = _compute_logp_stats(base_logp, base_ids)
                             ablt_stats = _compute_logp_stats(ablt_logp, ablt_ids)
-                            delta_seq = base_stats["logp_seq"] - ablt_stats["logp_seq"]
-                            delta_last = base_stats["logp_last"] - ablt_stats["logp_last"]
+                            delta_seq = ablt_stats["logp_seq"] - base_stats["logp_seq"]
+                            delta_last = ablt_stats["logp_last"] - base_stats["logp_last"]
                             kl_mean = _compute_kl_mean(base_logp, ablt_logp)
                             kl_last_token = _compute_kl_last_token(base_logp, ablt_logp)
                             hidden_kl = (

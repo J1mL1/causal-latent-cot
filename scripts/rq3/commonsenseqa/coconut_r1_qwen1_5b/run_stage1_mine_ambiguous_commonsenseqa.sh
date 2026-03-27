@@ -34,7 +34,7 @@ else
   DIST_FLAGS=""
 fi
 
-${LAUNCHER} --master_port 29501 experiments/rq3/stage1_mine_ambiguous.py \
+${LAUNCHER} experiments/rq3/stage1_mine_ambiguous.py \
   --config_path "${CONFIG}" \
   --output_dir "${OUTPUT_DIR}" \
   --latent_dropout 0.1 \

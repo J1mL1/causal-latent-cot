@@ -1,6 +1,6 @@
 """
 Utility to dump CommonsenseQA into a local JSONL file with fields
-compatible with the GSM8K ablation runner: {"question","answer","id"}.
+compatible with the GSM8K intervention runner: {"question","answer","id"}.
 
 Usage:
   python data/prepare_commonsenseqa_jsonl.py \

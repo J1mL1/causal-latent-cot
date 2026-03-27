@@ -12,8 +12,6 @@ from tqdm import tqdm
 import torch
 import torch.nn.functional as F
 import numpy as np
-import matplotlib.pyplot as plt
-import networkx as nx
 
 # Ensure project root is on sys.path when executed as a script.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -30,18 +28,18 @@ from common.experiment_utils import (
     build_teacher_state,
 )
 from common.model_registry import load_model
-from common.analysis.step_ablation import ablate_gaussian_on_h, ablate_gaussian_noise, ablate_zero
+from common.analysis.step_intervention import intervene_gaussian_on_h, intervene_gaussian_noise, intervene_zero
 from common.metrics.grad_sensitivity import compute_grad_sensitivity
 
 
-def apply_ablation(h_t: torch.Tensor, mode: str, sigma_scale: float) -> torch.Tensor:
+def apply_intervention(h_t: torch.Tensor, mode: str, sigma_scale: float) -> torch.Tensor:
     if mode == "zero":
-        return ablate_zero(h_t)
+        return intervene_zero(h_t)
     if mode == "gaussian_h":
-        return ablate_gaussian_on_h(h_t, sigma_scale=sigma_scale)
+        return intervene_gaussian_on_h(h_t, sigma_scale=sigma_scale)
     if mode == "gaussian":
-        return ablate_gaussian_noise(h_t, sigma_scale=sigma_scale)
-    raise ValueError(f"Unsupported ablation mode for causal graph: {mode}")
+        return intervene_gaussian_noise(h_t, sigma_scale=sigma_scale)
+    raise ValueError(f"Unsupported intervention mode for causal graph: {mode}")
 
 
 def compute_kl_and_delta(
@@ -59,14 +57,14 @@ def compute_kl_and_delta(
     target_ids_dev = target_ids.to(logits_clean.device)
     base_tok = logp_clean.gather(-1, target_ids_dev.unsqueeze(-1)).squeeze(-1)
     ablt_tok = logp_ablt.gather(-1, target_ids_dev.unsqueeze(-1)).squeeze(-1)
-    delta_sum = (base_tok - ablt_tok).sum(dim=-1).mean().item()
+    delta_sum = (ablt_tok - base_tok).sum(dim=-1).mean().item()
 
     seq_len = target_ids_dev.size(1)
     time_index = seq_len - 2 if seq_len >= 2 else seq_len - 1
     last_targets = target_ids_dev[:, time_index]
     base_last = logp_clean[:, time_index, :].gather(-1, last_targets.unsqueeze(-1)).squeeze(-1)
     ablt_last = logp_ablt[:, time_index, :].gather(-1, last_targets.unsqueeze(-1)).squeeze(-1)
-    delta_last = (base_last - ablt_last).mean().item()
+    delta_last = (ablt_last - base_last).mean().item()
 
     return {
         "kl_mean": kl_mean,
@@ -90,14 +88,14 @@ def compute_kl_and_delta_batch(
     target_ids_dev = target_ids.to(logits_clean.device)
     base_tok = logp_clean.gather(-1, target_ids_dev.unsqueeze(-1)).squeeze(-1)
     ablt_tok = logp_ablt.gather(-1, target_ids_dev.unsqueeze(-1)).squeeze(-1)
-    delta_sum = (base_tok - ablt_tok).sum(dim=-1)
+    delta_sum = (ablt_tok - base_tok).sum(dim=-1)
 
     seq_len = target_ids_dev.size(1)
     time_index = seq_len - 2 if seq_len >= 2 else seq_len - 1
     last_targets = target_ids_dev[:, time_index]
     base_last = logp_clean[:, time_index, :].gather(-1, last_targets.unsqueeze(-1)).squeeze(-1)
     ablt_last = logp_ablt[:, time_index, :].gather(-1, last_targets.unsqueeze(-1)).squeeze(-1)
-    delta_last = base_last - ablt_last
+    delta_last = ablt_last - base_last
 
     return {
         "kl_mean": kl_mean,
@@ -131,12 +129,12 @@ def main() -> None:
     parser.add_argument("--config_path", required=True)
     parser.add_argument("--output_path", required=True)
     parser.add_argument("--steps", default=None, help="Comma separated list or 'all'.")
-    parser.add_argument("--mode", default="zero", choices=["zero", "gaussian_h", "gaussian"], help="Ablation mode for i-step intervention.")
+    parser.add_argument("--mode", default="zero", choices=["zero", "gaussian_h", "gaussian"], help="Intervention mode for i-step latent perturbation.")
     parser.add_argument("--sigma_scale", type=float, default=0.5)
     parser.add_argument(
         "--include_self",
         action="store_true",
-        help="Include i==j ablations (e.g., ablate final latent itself before decoding).",
+        help="Include i==j interventions (e.g., intervene final latent itself before decoding).",
     )
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--num_workers", type=int, default=0, help="DataLoader workers for input loading.")
@@ -155,11 +153,16 @@ def main() -> None:
     parser.add_argument(
         "--model_type",
         default="coconut",
-        choices=["coconut", "codi", "softthinking"],
-        help="Latent model type for grad metrics.",
+        choices=[
+            "coconut",
+            "codi",
+            "simcot-coconut",
+            "simcot-codi",
+            "softthinking",
+        ],
+        help="Latent model type for grad metrics (Sim-CoT variants use the same path as coconut/codi).",
     )
     parser.add_argument("--save_adj", action="store_true", help="Save adjacency matrix as .npy alongside output jsonl.")
-    parser.add_argument("--save_graph", action="store_true", help="Save a causal graph image (PNG) with edge weights.")
     args = parser.parse_args()
 
     # Distributed setup (optional)
@@ -339,7 +342,7 @@ def main() -> None:
                         if node_i == node_j:
                             if isinstance(node_j, str) and node_j.lower() == "end":
                                 continue
-                            # For i==j, match ablation experiment semantics: run to end before teacher forcing.
+                            # For i==j, match intervention experiment semantics: run to end before teacher forcing.
                             base_out = model.rollout_from_step(h_clean, state_clean)
                             base_state = build_teacher_state(base_out, state_clean)
                             if base_state is None:
@@ -350,7 +353,7 @@ def main() -> None:
                                 )
                             logits_clean = model.compute_logits(h_clean, base_state, target_ids)
 
-                            h_i_mod = apply_ablation(h_clean, args.mode, args.sigma_scale)
+                            h_i_mod = apply_intervention(h_clean, args.mode, args.sigma_scale)
                             ablt_out = model.rollout_from_step(h_i_mod, state_clean)
                             ablt_state = build_teacher_state(ablt_out, state_clean)
                             if ablt_state is None:
@@ -363,7 +366,7 @@ def main() -> None:
                             kl_logit_ht = compute_logit_kl_from_hidden_batch(model, h_clean, h_i_mod)
                         else:
                             h_i, state_i = model.forward_until_step(prompts, node_i)
-                            h_i_mod = apply_ablation(h_i, args.mode, args.sigma_scale)
+                            h_i_mod = apply_intervention(h_i, args.mode, args.sigma_scale)
                             if isinstance(node_j, int):
                                 if not hasattr(model, "rollout_to_step"):
                                     raise AttributeError("Model lacks rollout_to_step required for causal graph.")
@@ -460,26 +463,6 @@ def main() -> None:
                 edge_perc[metric_key][(i_node, j_node)] = np.percentile(arr, [25, 50, 75]).tolist()
             if args.save_adj:
                 np.save(output_path.with_suffix(f".{metric_key}.adj.npy"), adj_mat)
-
-            if args.save_graph:
-                g = nx.DiGraph()
-                g.add_nodes_from([str(n) for n in nodes])
-                for (i_node, j_node), vals in adj_values[metric_key].items():
-                    if not vals:
-                        continue
-                    w = float(np.nanmedian(np.array(vals, dtype=float)))
-                    if np.isnan(w):
-                        continue
-                    g.add_edge(str(i_node), str(j_node), weight=w, label=f"{w:.3f}")
-                plt.figure(figsize=(8, 6))
-                pos = nx.spring_layout(g, seed=42)
-                edge_labels = nx.get_edge_attributes(g, "label")
-                nx.draw_networkx(g, pos, with_labels=True, node_color="#aed1e9", edge_color="#4a6fa5", arrows=True)
-                nx.draw_networkx_edge_labels(g, pos, edge_labels=edge_labels, font_size=8)
-                plt.axis("off")
-                plt.tight_layout()
-                plt.savefig(output_path.with_suffix(f".{metric_key}.png"), dpi=200)
-                plt.close()
 
     # Merge rank outputs
     if dist is not None and world_size > 1:

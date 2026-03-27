@@ -48,6 +48,6 @@ rq3:
   probe_step: "final"
   early_steps: [2, 3]
   late_step: "final"
-  ablate_step: 2
-  ablate_lambda: 1.0
+  intervene_step: 2
+  intervene_lambda: 1.0
   orthogonalize: "gram_schmidt"

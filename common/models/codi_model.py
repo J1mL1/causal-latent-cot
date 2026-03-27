@@ -154,6 +154,10 @@ class CodiWrapper(LatentReasoningModel):
             else:
                 raise FileNotFoundError(f"No checkpoint found in {model_args.ckpt_dir}")
             self.model.load_state_dict(state_dict, strict=False)
+        # Checkpoint tensors may be fp32 while backbone is fp16/bf16; re-align prj after load.
+        if train_args.use_prj and hasattr(self.model, "prj"):
+            _prj_dtype = self.model.get_embd(self.model.codi, self.model.model_name).weight.dtype
+            self.model.prj.to(dtype=_prj_dtype)
         # Honor precision flag: keep fp32 when full_precision is requested.
         if not model_args.full_precision and not train_args.bf16:
             self.model.half()
@@ -344,7 +348,7 @@ class CodiWrapper(LatentReasoningModel):
             )
         latent_embd = h_t_modified
         # We already ran `start_step` iterations in forward_until_step; finish out the
-        # configured total so the ablated latent still flows into the cache before decoding.
+        # configured total so the intervened latent still flows into the cache before decoding.
         remaining = 0 if not continue_latents else max(self.num_latent - start_step, 0)
 
         # If we don't continue latents, still write the current latent into the cache once.

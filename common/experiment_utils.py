@@ -476,22 +476,23 @@ def compute_teacher_forced_metrics(
     h_t: torch.Tensor,
     h_t_modified: torch.Tensor,
     baseline_state: Optional[Dict[str, Any]],
-    ablated_state: Optional[Dict[str, Any]],
+    intervened_state: Optional[Dict[str, Any]],
 ) -> Dict[str, float | str]:
     """
     Compute Δ log p(y) and distribution deltas using teacher-forced logits.
+    Convention: Δ log p = log p(intervened) - log p(baseline) on gold tokens (same as delta_acc).
     Returns empty dict when unavailable (e.g., missing tokenizer/compute_logits).
     """
     metrics: Dict[str, float | str] = {}
     if target_ids is None or not hasattr(model, "compute_logits"):
         return metrics
-    if baseline_state is None or ablated_state is None:
+    if baseline_state is None or intervened_state is None:
         return metrics
     baseline_state = _clone_teacher_state(baseline_state)
-    ablated_state = _clone_teacher_state(ablated_state)
+    intervened_state = _clone_teacher_state(intervened_state)
     try:
         logits_base = model.compute_logits(h_t, baseline_state, target_ids)
-        logits_ablt = model.compute_logits(h_t_modified, ablated_state, target_ids)
+        logits_ablt = model.compute_logits(h_t_modified, intervened_state, target_ids)
     except Exception as exc:  # pragma: no cover - best effort metrics
         metrics["teacher_forced_error"] = str(exc)
         return metrics
@@ -506,7 +507,7 @@ def compute_teacher_forced_metrics(
     if target_ids_dev.size(1) > 0:
         base_tok_logp = log_probs_base.gather(-1, target_ids_dev.unsqueeze(-1)).squeeze(-1)
         ablt_tok_logp = log_probs_ablt.gather(-1, target_ids_dev.unsqueeze(-1)).squeeze(-1)
-        seq_delta = (base_tok_logp - ablt_tok_logp).sum(dim=-1).mean()
+        seq_delta = (ablt_tok_logp - base_tok_logp).sum(dim=-1).mean()
         metrics["teacher_forced_delta_sum"] = seq_delta.item()
 
     # Final-token Δ log p(y*): by default target_ids include an eos; use the penultimate token when available.
@@ -516,14 +517,14 @@ def compute_teacher_forced_metrics(
         last_targets = target_ids_dev[:, time_index]
         base_last = log_probs_base[:, time_index, :].gather(-1, last_targets.unsqueeze(-1)).squeeze(-1)
         ablt_last = log_probs_ablt[:, time_index, :].gather(-1, last_targets.unsqueeze(-1)).squeeze(-1)
-        metrics["delta_logp_final_token"] = (base_last - ablt_last).mean().item()
+        metrics["delta_logp_final_token"] = (ablt_last - base_last).mean().item()
 
     # Distributional shifts on that same token position.
     if seq_len > 0:
         final_pos = seq_len - 2 if seq_len >= 2 else -1
         base_final_lp = log_probs_base[:, final_pos, :]
         ablt_final_lp = log_probs_ablt[:, final_pos, :]
-        metrics["kl_final_baseline_to_ablated"] = F.kl_div(
+        metrics["kl_final_baseline_to_intervened"] = F.kl_div(
             base_final_lp, ablt_final_lp.exp(), reduction="batchmean"
         ).item()
         metrics["l2_final_prob_dist"] = torch.norm(
@@ -539,6 +540,7 @@ def compute_teacher_forced_metrics_from_logits(
 ) -> Dict[str, torch.Tensor]:
     """
     Compute per-sample teacher-forced deltas from precomputed logits.
+    Δ log p = log p(intervened) - log p(baseline) on gold tokens.
     Returns tensors with shape [B].
     """
     metrics: Dict[str, torch.Tensor] = {}
@@ -550,7 +552,7 @@ def compute_teacher_forced_metrics_from_logits(
 
     base_tok_logp = log_probs_base.gather(-1, target_ids_dev.unsqueeze(-1)).squeeze(-1)
     ablt_tok_logp = log_probs_ablt.gather(-1, target_ids_dev.unsqueeze(-1)).squeeze(-1)
-    metrics["teacher_forced_delta_sum"] = (base_tok_logp - ablt_tok_logp).sum(dim=-1)
+    metrics["teacher_forced_delta_sum"] = (ablt_tok_logp - base_tok_logp).sum(dim=-1)
 
     seq_len = target_ids_dev.size(1)
     if seq_len > 0:
@@ -558,12 +560,12 @@ def compute_teacher_forced_metrics_from_logits(
         last_targets = target_ids_dev[:, time_index]
         base_last = log_probs_base[:, time_index, :].gather(-1, last_targets.unsqueeze(-1)).squeeze(-1)
         ablt_last = log_probs_ablt[:, time_index, :].gather(-1, last_targets.unsqueeze(-1)).squeeze(-1)
-        metrics["delta_logp_final_token"] = base_last - ablt_last
+        metrics["delta_logp_final_token"] = ablt_last - base_last
 
         base_final_lp = log_probs_base[:, time_index, :]
         ablt_final_lp = log_probs_ablt[:, time_index, :]
         base_final_p = base_final_lp.exp()
-        metrics["kl_final_baseline_to_ablated"] = (base_final_p * (base_final_lp - ablt_final_lp)).sum(dim=-1)
+        metrics["kl_final_baseline_to_intervened"] = (base_final_p * (base_final_lp - ablt_final_lp)).sum(dim=-1)
         metrics["l2_final_prob_dist"] = torch.norm(base_final_p - ablt_final_lp.exp(), p=2, dim=-1)
     return metrics
 
@@ -574,7 +576,7 @@ def compute_teacher_forced_metrics_batch(
     h_t: torch.Tensor,
     h_t_modified: torch.Tensor,
     baseline_state: Optional[Dict[str, Any]],
-    ablated_state: Optional[Dict[str, Any]],
+    intervened_state: Optional[Dict[str, Any]],
 ) -> Dict[str, torch.Tensor]:
     """
     Batched variant of compute_teacher_forced_metrics.
@@ -583,13 +585,13 @@ def compute_teacher_forced_metrics_batch(
     metrics: Dict[str, torch.Tensor] = {}
     if target_ids is None or not hasattr(model, "compute_logits"):
         return metrics
-    if baseline_state is None or ablated_state is None:
+    if baseline_state is None or intervened_state is None:
         return metrics
     baseline_state = _clone_teacher_state(baseline_state)
-    ablated_state = _clone_teacher_state(ablated_state)
+    intervened_state = _clone_teacher_state(intervened_state)
     try:
         logits_base = model.compute_logits(h_t, baseline_state, target_ids)
-        logits_ablt = model.compute_logits(h_t_modified, ablated_state, target_ids)
+        logits_ablt = model.compute_logits(h_t_modified, intervened_state, target_ids)
     except Exception:
         return metrics
 

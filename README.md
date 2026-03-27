@@ -31,7 +31,7 @@ The repository intentionally excludes publication-unfriendly dependencies such a
 
 The codebase is organized around three research questions:
 
-- `RQ1`: step ablation and sufficiency analyses
+- `RQ1`: step intervention and sufficiency analyses
 - `RQ2`: latent and explicit causal graph analyses
 - `RQ3`: superposition, projection, and intervention analyses
 
@@ -57,8 +57,8 @@ These placeholders are expanded automatically by the Python config loader.
 ### 1. Clone the repository
 
 ```bash
-git clone <repo-url>
-cd latentCoT
+git clone https://github.com/J1mL1/causal-latent-cot.git
+cd causal-latent-cot
 ```
 
 ### 2. Create a Python environment
@@ -78,7 +78,7 @@ You may need to install additional dependencies depending on which model family 
 If your local layout differs from the defaults, set:
 
 ```bash
-export PROJECT_ROOT=/path/to/latentCoT
+export PROJECT_ROOT=/path/to/causal-latent-cot
 export MODEL_DIR=/path/to/local/models
 export R_ENV_NAME=latentcot-r
 ```
@@ -113,7 +113,7 @@ Representative commands:
 ### RQ1
 
 ```bash
-bash scripts/rq1/ablation/gsm8k/run_coconut_ablation_gpt2_gsm8k.sh
+bash scripts/rq1/intervention/gsm8k/run_coconut_intervention_gpt2_gsm8k.sh
 bash scripts/rq1/sufficiency/commonsenseqa/run_coconut_llama1b_sufficiency_commonsenseqa.sh
 ```
 
@@ -154,9 +154,10 @@ External repositories:
 
 ```bash
 mkdir -p external
-git clone <coconut-repo-url> external/coconut
-git clone <codi-repo-url> external/codi
-git clone <prontoqa-repo-url> external/prontoqa
+git clone https://github.com/facebookresearch/coconut.git external/coconut
+git clone https://github.com/zhenyi4/codi.git external/codi
+git clone https://github.com/asaparov/prontoqa.git external/prontoqa
+git clone https://github.com/InternLM/SIM-CoT.git external/sim-cot
 ```
 
 ## License
@@ -171,6 +172,7 @@ This project builds on several upstream method implementations and benchmark dat
 
 - Coconut
 - CODI
+- SIM-CoT
 - CommonsenseQA
 - GSM8K
 - ProntoQA
