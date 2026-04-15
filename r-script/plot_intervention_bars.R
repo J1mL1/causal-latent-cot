@@ -166,11 +166,11 @@ for (model in names(opts$inputs)) {
       batch_idx = ifelse("batch_idx" %in% names(df), as.integer(batch_idx), 0L),
       gold_raw = ifelse("gold_answer" %in% names(df), as.character(gold_answer), NA_character_),
       baseline_text = {
-        b_list <- to_list_col(baseline, nrow(df))
+        b_list <- to_list_col(df[["baseline"]], nrow(df))
         vapply(seq_len(nrow(df)), function(i) get_text_field(b_list[[i]], batch_idx[[i]]), character(1))
       },
       intervened_text = {
-        a_list <- to_list_col(intervened, nrow(df))
+        a_list <- to_list_col(get_intervened_column_df(df), nrow(df))
         vapply(seq_len(nrow(df)), function(i) get_text_field(a_list[[i]], batch_idx[[i]]), character(1))
       },
       gold_ans = extract_answer(gold_raw),

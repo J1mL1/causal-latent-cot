@@ -23,11 +23,10 @@ ensure_cols <- function(df, cols) {
 }
 
 build_step_levels <- function(df) {
-  steps <- df %>%
-    mutate(step_i_int = to_step_int(step_i)) %>%
-    filter(!is.na(step_i_int)) %>%
-    distinct(step_i_int) %>%
-    arrange(step_i_int) %>%
-    pull(step_i_int)
+  # Union numeric steps from both axes: step_i alone misses the last latent (e.g. edges (5,6)
+  # have step_i=5, step_j=6; with --no-include_self there may be no row with step_i=6).
+  si <- df %>% mutate(v = to_step_int(step_i)) %>% filter(!is.na(v)) %>% distinct(v) %>% pull(v)
+  sj <- df %>% mutate(v = to_step_int(step_j)) %>% filter(!is.na(v)) %>% distinct(v) %>% pull(v)
+  steps <- sort(unique(c(si, sj)))
   as.character(steps)
 }

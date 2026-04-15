@@ -2,19 +2,31 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}" && git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../../../.." && pwd)}"
 
-CONDA_ENV="codi"
-CUDA_VISIBLE_DEVICES="0,1,2,3"
-NPROC=4                # >1 to enable torchrun
+# Shared HF weights: optional MODEL_DIR via scripts/common/default_model_dir.sh (sibling ../models if present).
+source "${PROJECT_ROOT}/scripts/common/default_model_dir.sh"
+
+RUN_SLUG="${RUN_SLUG:-codi-gpt2-gsm8k}"
+
+
+source "${SCRIPT_DIR}/../_gsm8k_skip_helpers.sh"
+if gsm8k_skip_if_file "${PROJECT_ROOT}/outputs/rq3/${RUN_SLUG}/ambiguous/ambiguous_samples.jsonl"; then exit 0; fi
+
+
+CONDA_ENV="latentCoT"
+CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+NPROC="${NPROC:-1}"
 MASTER_PORT="${MASTER_PORT:-29520}"
 DIST_URL="env://"
 DIST_BACKEND="nccl"
 CONFIG="configs/rq3/superposition_codi_gpt2_gsm8k.yaml"
-OUTPUT_DIR="outputs/rq3/codi_gpt2/ambiguous"
+OUTPUT_DIR="outputs/rq3/${RUN_SLUG}/ambiguous"
+
+BATCH_SIZE="${BATCH_SIZE:-128}"
 
 export CUDA_VISIBLE_DEVICES
-export CUDA_LAUNCH_BLOCKING=1
+# Sync CUDA (very slow); only for debugging: export CUDA_LAUNCH_BLOCKING=1
 
 eval "$(${CONDA_EXE:-conda} shell.bash hook)"
 conda activate "${CONDA_ENV}"
@@ -38,6 +50,6 @@ ${LAUNCHER} experiments/rq3/stage1_mine_ambiguous.py \
   --config_path "${CONFIG}" \
   --output_dir "${OUTPUT_DIR}" \
   --latent_dropout 0.1 \
-  --batch_size 8 \
+  --batch_size "${BATCH_SIZE}" \
   --num_workers 8 \
   ${DIST_FLAGS}

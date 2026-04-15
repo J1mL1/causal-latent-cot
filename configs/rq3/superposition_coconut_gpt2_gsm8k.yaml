@@ -24,7 +24,7 @@ rq3:
   temperature: 0.7
   num_samples: 40
   max_new_tokens: 64
-  ambiguity_min_cover: 0.8
+  ambiguity_min_cover: 0.5
   ambiguity_min_ratio: 0.2
   ambiguity_max_ratio: 0.8
   activity_epsilon: 0.02

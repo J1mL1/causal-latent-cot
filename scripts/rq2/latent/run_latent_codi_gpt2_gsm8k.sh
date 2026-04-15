@@ -17,10 +17,12 @@ NUM_WORKERS=0
 DIST_URL="env://"
 DIST_BACKEND="nccl"
 CONFIG="configs/rq1/codi/gpt2-gsm8k.yaml"
-OUTPUT="outputs/rq2/latent_graph/gsm8k_codi_gpt2_latent_graph.jsonl"
+OUTPUT="outputs/rq2/latent_graph/gsm8k_codi_gpt2_latent_graph_gaussian_h.jsonl"
 STEPS="1,2,3,4,5,6"
-MODE="zero"            # zero | gaussian_h | gaussian
-INCLUDE_SELF="--include_self"  # set to "" to disable
+MODE="gaussian_h"            # zero | mean | mean_step | gaussian_h | gaussian (mean* use --mean_cache_path or on-the-fly estimate)
+# Used only when MODE is mean/mean_step; in distributed mode rank0 writes, other ranks load.
+MEAN_CACHE="outputs/rq1/mean_latents/codi_gpt2.pt"
+INCLUDE_SELF=""  # set to "" to disable
 # ===========================
 
 export CUDA_VISIBLE_DEVICES
@@ -50,6 +52,7 @@ ${LAUNCHER} experiments/rq2/run_latent_causal_graph.py \
   --output_path "${OUTPUT}" \
   --steps "${STEPS}" \
   --mode "${MODE}" \
+  --mean_cache_path "${MEAN_CACHE}" \
   ${INCLUDE_SELF} \
   --batch_size "${BATCH_SIZE}" \
   --num_workers "${NUM_WORKERS}" \

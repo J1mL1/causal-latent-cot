@@ -13,6 +13,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ncol", type=int, default=3, help="Number of columns.")
     parser.add_argument("--bg", default="white", help="Background color.")
     parser.add_argument("--pad", type=int, default=0, help="Padding between tiles (px).")
+    parser.add_argument(
+        "--font_path",
+        default=None,
+        help="Optional .ttf/.otf font path for labels. If omitted, tries common system fonts then falls back to PIL default font.",
+    )
     parser.add_argument("--label_prefix", default=None, help="Prefix for panel labels, e.g. '(' for (a).")
     parser.add_argument("--label_suffix", default=None, help="Suffix for panel labels, e.g. ')' for (a).")
     parser.add_argument("--labels", nargs="+", default=None, help="Custom labels for each tile.")
@@ -41,18 +46,31 @@ def main() -> None:
 
     font = None
     font_scale = 1
-    font_candidates = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    ]
+    font_candidates = []
+    if args.font_path:
+        font_candidates.append(args.font_path)
+    font_candidates.extend(
+        [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        ]
+    )
     for cand in font_candidates:
         try:
-            font = ImageFont.truetype(cand, args.label_size)
-            break
+            if cand:
+                font = ImageFont.truetype(cand, args.label_size)
+                break
         except OSError:
             continue
     if font is None:
-        raise FileNotFoundError("DejaVu font not found at /usr/share/fonts/truetype/dejavu/")
+        # Minimal environments may not ship system fonts; fall back to PIL default.
+        font = ImageFont.load_default()
 
     labels = None
     if args.labels_file:

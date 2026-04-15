@@ -5,6 +5,7 @@ import copy
 import json
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -19,7 +20,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from common.analysis.step_intervention import (
     estimate_global_mean_latent,
+    estimate_global_mean_latent_accumulators,
     estimate_step_mean_latents,
+    estimate_step_mean_latents_accumulators,
+    infer_latent_hidden_dim,
     run_step_intervention,
 )
 from common.model_registry import load_model
@@ -40,6 +44,51 @@ from common.experiment_utils import (
 
 # Stored in each JSONL row; plotting code uses this to avoid double-flipping legacy files.
 LOGP_DELTA_CONVENTION = "intervened_minus_baseline"
+
+
+def _dist_reduce_global_mean(
+    dist: Any,
+    local_sums: torch.Tensor,
+    local_count: int,
+    local_rank: int,
+) -> torch.Tensor:
+    """All-reduce sum and count, then return global mean on CPU (float32)."""
+    dev = torch.device(f"cuda:{local_rank}") if torch.cuda.is_available() else torch.device("cpu")
+    s = local_sums.to(dev)
+    c = torch.tensor([float(local_count)], dtype=torch.float32, device=dev)
+    dist.all_reduce(s, op=dist.ReduceOp.SUM)
+    dist.all_reduce(c, op=dist.ReduceOp.SUM)
+    total = c.item()
+    if total <= 0:
+        raise RuntimeError("Global mean latent failed: zero samples across all ranks after aggregation.")
+    return (s / total).cpu()
+
+
+def _dist_reduce_step_means(
+    dist: Any,
+    max_steps: int,
+    hidden_dim: int,
+    sums: Dict[int, torch.Tensor],
+    counts: Dict[int, int],
+    local_rank: int,
+) -> Dict[int, torch.Tensor]:
+    """All-reduce per-step sums and counts, then return {step: mu} on CPU."""
+    dev = torch.device(f"cuda:{local_rank}") if torch.cuda.is_available() else torch.device("cpu")
+    mat = torch.zeros(max_steps, hidden_dim, dtype=torch.float32, device=dev)
+    cnt = torch.zeros(max_steps, dtype=torch.float32, device=dev)
+    for step in range(1, max_steps + 1):
+        if step in sums:
+            mat[step - 1] = sums[step].to(dev)
+            cnt[step - 1] = float(counts[step])
+    dist.all_reduce(mat, op=dist.ReduceOp.SUM)
+    dist.all_reduce(cnt, op=dist.ReduceOp.SUM)
+    out: Dict[int, torch.Tensor] = {}
+    for step in range(1, max_steps + 1):
+        if cnt[step - 1].item() > 0:
+            out[step] = (mat[step - 1] / cnt[step - 1].item()).cpu().to(torch.float32)
+    if not out:
+        raise RuntimeError("Per-step mean latents failed: no states across all ranks after aggregation.")
+    return out
 
 
 def main() -> None:
@@ -93,11 +142,14 @@ def main() -> None:
         world_size = int(os.environ.get("WORLD_SIZE", "1"))
         if torch.cuda.is_available():
             torch.cuda.set_device(local_rank)
+        # Mean estimation on rank 0 can exceed Gloo's default monitoredBarrier (~600s).
+        _timeout_sec = int(os.environ.get("TORCH_DISTRIBUTED_TIMEOUT_SEC", "7200"))
         dist.init_process_group(
             backend=args.dist_backend,
             init_method=args.dist_url,
             world_size=world_size,
             rank=rank,
+            timeout=timedelta(seconds=_timeout_sec),
         )
 
     config = load_config(args.config_path)
@@ -163,7 +215,19 @@ def main() -> None:
             sample["prompt"] if isinstance(sample, dict) and "prompt" in sample else sample
             for sample in dataset_full
         ]
-        if dist is None or rank == 0:
+        if dist is not None and world_size > 1:
+            mean_shard = [mean_dataset[i] for i in range(rank, len(mean_dataset), world_size)]
+            dl_mean = create_dataloader(
+                mean_shard,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                pin_memory=pin_memory,
+                persistent_workers=persistent_workers,
+                prefetch_factor=args.prefetch_factor,
+            )
+            sums, cnt = estimate_global_mean_latent_accumulators(model, dl_mean, args.max_mean_steps)
+            mu = _dist_reduce_global_mean(dist, sums, cnt, local_rank)
+        else:
             mu = estimate_global_mean_latent(
                 model,
                 create_dataloader(
@@ -182,7 +246,29 @@ def main() -> None:
             for sample in dataset_full
         ]
         max_step_to_collect = max(numeric_steps) if numeric_steps else args.max_mean_steps
-        if dist is None or rank == 0:
+        if max_step_to_collect is None:
+            max_step_to_collect = 1
+        if dist is not None and world_size > 1:
+            mean_shard = [mean_dataset[i] for i in range(rank, len(mean_dataset), world_size)]
+            dl_mean = create_dataloader(
+                mean_shard,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                pin_memory=pin_memory,
+                persistent_workers=persistent_workers,
+                prefetch_factor=args.prefetch_factor,
+            )
+            sums_s, counts_s = estimate_step_mean_latents_accumulators(
+                model,
+                dl_mean,
+                max_steps=max_step_to_collect,
+                include_start=False,
+            )
+            hd = infer_latent_hidden_dim(model)
+            mu_by_step = _dist_reduce_step_means(
+                dist, max_step_to_collect, hd, sums_s, counts_s, local_rank
+            )
+        else:
             mu_by_step = estimate_step_mean_latents(
                 model,
                 create_dataloader(

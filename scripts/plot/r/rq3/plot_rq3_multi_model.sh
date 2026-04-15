@@ -12,12 +12,12 @@ OUT_DIR="${ROOT}/outputs/rq3/plots/rq3-metrics-multi"
 
 # Edit inputs as needed: label=metrics_dir
 INPUTS=(
-  "coconut_gpt2=${ROOT}/outputs/rq3/plots/rq3-metrics-coconut_gpt2"
-  "coconut_llama1b=${ROOT}/outputs/rq3/plots/rq3-metrics-coconut_llama1b"
-  "coconut_qwen3_1_7b=${ROOT}/outputs/rq3/plots/rq3-metrics-coconut_qwen3_1_7b"
-  "coconut_r1_qwen1_5b=${ROOT}/outputs/rq3/plots/rq3-metrics-coconut_r1_qwen1_5b"
-  "codi_gpt2=${ROOT}/outputs/rq3/plots/rq3-metrics-codi_gpt2"
-  "codi_llama1b=${ROOT}/outputs/rq3/plots/rq3-metrics-codi_llama1b"
+  "coco-gpt2-gsm8k=${ROOT}/outputs/rq3/plots/rq3-metrics-coco-gpt2-gsm8k"
+  "coco-llama1b-gsm8k=${ROOT}/outputs/rq3/plots/rq3-metrics-coco-llama1b-gsm8k"
+  "coco-qwen3-4b-gsm8k=${ROOT}/outputs/rq3/plots/rq3-metrics-coco-qwen3-4b-gsm8k"
+  "codi-gpt2-gsm8k=${ROOT}/outputs/rq3/plots/rq3-metrics-codi-gpt2-gsm8k"
+  "codi-llama1b-gsm8k=${ROOT}/outputs/rq3/plots/rq3-metrics-codi-llama1b-gsm8k"
+  "codi-qwen3-4b-gsm8k=${ROOT}/outputs/rq3/plots/rq3-metrics-codi-qwen3-4b-gsm8k"
 )
 
 ARGS=()

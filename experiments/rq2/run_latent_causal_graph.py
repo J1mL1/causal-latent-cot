@@ -4,9 +4,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pickle
 import sys
+import time
+from datetime import timedelta
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from tqdm import tqdm
 
 import torch
@@ -28,13 +31,66 @@ from common.experiment_utils import (
     build_teacher_state,
 )
 from common.model_registry import load_model
-from common.analysis.step_intervention import intervene_gaussian_on_h, intervene_gaussian_noise, intervene_zero
+from common.analysis.step_intervention import (
+    estimate_global_mean_latent,
+    estimate_step_mean_latents,
+    intervene_gaussian_on_h,
+    intervene_gaussian_noise,
+    intervene_mean,
+    intervene_zero,
+)
 from common.metrics.grad_sensitivity import compute_grad_sensitivity
 
 
-def apply_intervention(h_t: torch.Tensor, mode: str, sigma_scale: float) -> torch.Tensor:
+def _atomic_torch_save(obj: Any, path: Path) -> None:
+    """Avoid other ranks seeing a half-written .pt (EOFError on torch.load)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    torch.save(obj, tmp)
+    tmp.replace(path)
+
+
+def _safe_torch_load(path: Path) -> Optional[Dict[str, Any]]:
+    """Load mean cache; None if missing, truncated, or corrupted."""
+    try:
+        try:
+            return torch.load(path, map_location="cpu", weights_only=False)
+        except TypeError:
+            return torch.load(path, map_location="cpu")
+    except (EOFError, OSError, pickle.UnpicklingError, RuntimeError):
+        return None
+
+
+def node_to_intervention_step(node: Any, numeric_nodes: List[int]) -> int:
+    if isinstance(node, int):
+        return node
+    if isinstance(node, str) and node.lower() == "end":
+        if not numeric_nodes:
+            raise ValueError("Cannot map node 'end' to a mean step without numeric latent steps.")
+        return max(numeric_nodes)
+    raise ValueError(f"Unsupported node for mean replacement: {node}")
+
+
+def apply_intervention(
+    h_t: torch.Tensor,
+    mode: str,
+    sigma_scale: float,
+    mu: Optional[torch.Tensor] = None,
+    mu_by_step: Optional[Dict[int, torch.Tensor]] = None,
+    intervention_step: Optional[int] = None,
+) -> torch.Tensor:
     if mode == "zero":
         return intervene_zero(h_t)
+    if mode == "mean":
+        if mu is None:
+            raise ValueError("mode 'mean' requires a global mean latent (mu).")
+        return intervene_mean(h_t, mu)
+    if mode == "mean_step":
+        if mu_by_step is None or intervention_step is None:
+            raise ValueError("mode 'mean_step' requires mu_by_step and intervention_step.")
+        if intervention_step not in mu_by_step:
+            raise ValueError(f"No per-step mean for latent step {intervention_step}.")
+        return intervene_mean(h_t, mu_by_step[intervention_step])
     if mode == "gaussian_h":
         return intervene_gaussian_on_h(h_t, sigma_scale=sigma_scale)
     if mode == "gaussian":
@@ -129,7 +185,23 @@ def main() -> None:
     parser.add_argument("--config_path", required=True)
     parser.add_argument("--output_path", required=True)
     parser.add_argument("--steps", default=None, help="Comma separated list or 'all'.")
-    parser.add_argument("--mode", default="zero", choices=["zero", "gaussian_h", "gaussian"], help="Intervention mode for i-step latent perturbation.")
+    parser.add_argument(
+        "--mode",
+        default="zero",
+        choices=["zero", "mean", "mean_step", "gaussian_h", "gaussian"],
+        help="Intervention on h at step i: zero | mean (global mu) | mean_step (per-step mu) | gaussian_* .",
+    )
+    parser.add_argument(
+        "--mean_cache_path",
+        default=None,
+        help="Path to .pt from rq1 run_step_intervention (keys mu, mu_by_step). Required for distributed mean/mean_step.",
+    )
+    parser.add_argument(
+        "--max_mean_steps",
+        type=int,
+        default=None,
+        help="When estimating means from data (cache miss), max latent steps (default: max graph step).",
+    )
     parser.add_argument("--sigma_scale", type=float, default=0.5)
     parser.add_argument(
         "--include_self",
@@ -181,11 +253,14 @@ def main() -> None:
             local_rank = int(os.environ.get("LOCAL_RANK", "0"))
         rank = int(os.environ.get("RANK", "0"))
         world_size = int(os.environ.get("WORLD_SIZE", "1"))
+        # Gloo monitoredBarrier default can be ~600s; large adjacency or stragglers may need more.
+        _timeout_sec = int(os.environ.get("TORCH_DISTRIBUTED_TIMEOUT_SEC", "7200"))
         dist.init_process_group(
             backend=args.dist_backend,
             init_method=args.dist_url,
             world_size=world_size,
             rank=rank,
+            timeout=timedelta(seconds=_timeout_sec),
         )
         if torch.cuda.is_available():
             torch.cuda.set_device(local_rank)
@@ -227,6 +302,98 @@ def main() -> None:
     invalid_zero_based = [s for s in numeric_nodes if s < 1]
     if invalid_zero_based:
         raise ValueError(f"Causal graph steps must be 1-based, got invalid: {invalid_zero_based}")
+
+    mu: Optional[torch.Tensor] = None
+    mu_by_step: Optional[Dict[int, torch.Tensor]] = None
+    if args.mode in {"mean", "mean_step"}:
+        if dist is not None and world_size > 1 and not args.mean_cache_path:
+            raise ValueError(
+                "Distributed runs with --mode mean or mean_step require --mean_cache_path "
+                "(rank 0 writes estimates; other ranks load)."
+            )
+        mean_cache = Path(args.mean_cache_path) if args.mean_cache_path else None
+        if mean_cache and mean_cache.exists():
+            payload = _safe_torch_load(mean_cache)
+            if payload is not None:
+                mu = payload.get("mu")
+                mu_by_step = payload.get("mu_by_step")
+            elif rank == 0:
+                print(
+                    f"[causal graph] warning: mean cache unreadable or truncated, will recompute: {mean_cache}",
+                    file=sys.stderr,
+                )
+
+        mean_dataset = [
+            sample["prompt"] if isinstance(sample, dict) and "prompt" in sample else sample
+            for sample in dataset_full
+        ]
+        max_for_global = args.max_mean_steps if args.max_mean_steps is not None else (max(numeric_nodes) if numeric_nodes else 1)
+        if args.mode == "mean" and mu is None:
+            if dist is None or rank == 0:
+                mu = estimate_global_mean_latent(
+                    model,
+                    create_dataloader(
+                        mean_dataset,
+                        batch_size=args.batch_size,
+                        num_workers=args.num_workers,
+                        pin_memory=pin_memory,
+                        persistent_workers=persistent_workers,
+                        prefetch_factor=args.prefetch_factor,
+                    ),
+                    max_steps=max_for_global,
+                )
+        if args.mode == "mean_step" and mu_by_step is None:
+            max_step_collect = max(numeric_nodes) if numeric_nodes else args.max_mean_steps
+            if max_step_collect is None:
+                raise ValueError("mean_step estimation needs numeric graph steps or --max_mean_steps.")
+            if dist is None or rank == 0:
+                mu_by_step = estimate_step_mean_latents(
+                    model,
+                    create_dataloader(
+                        mean_dataset,
+                        batch_size=args.batch_size,
+                        num_workers=args.num_workers,
+                        pin_memory=pin_memory,
+                        persistent_workers=persistent_workers,
+                        prefetch_factor=args.prefetch_factor,
+                    ),
+                    max_steps=int(max_step_collect),
+                    include_start=False,
+                )
+
+        if mean_cache is not None and (mu is not None or mu_by_step is not None) and (dist is None or rank == 0):
+            _atomic_torch_save({"mu": mu, "mu_by_step": mu_by_step}, mean_cache)
+
+        if dist is not None and world_size > 1 and mean_cache is not None:
+            if torch.cuda.is_available():
+                dist.barrier(device_ids=[local_rank])
+            else:
+                dist.barrier()
+            if mean_cache.exists() and rank != 0:
+                payload = None
+                for _ in range(60):
+                    payload = _safe_torch_load(mean_cache)
+                    if payload is not None:
+                        break
+                    time.sleep(0.5)
+                if payload is None:
+                    raise RuntimeError(
+                        f"Rank {rank}: failed to load mean cache after barrier (EOF/corrupt?): {mean_cache}"
+                    )
+                mu = payload.get("mu", mu)
+                mu_by_step = payload.get("mu_by_step", mu_by_step)
+
+        if args.mode == "mean" and mu is None:
+            raise RuntimeError("Failed to obtain global mean latent mu.")
+        if args.mode == "mean_step" and mu_by_step is None:
+            raise RuntimeError("Failed to obtain per-step means mu_by_step.")
+
+        dev = getattr(model, "device", torch.device("cpu"))
+        if mu is not None:
+            mu = mu.to(dev)
+        if mu_by_step is not None:
+            mu_by_step = {int(k): v.to(dev) for k, v in mu_by_step.items()}
+
     if rank == 0:
         print(f"[causal graph] nodes (sorted): {nodes}")
     use_gsm8k_parse = config.get("dataset_name") == "gsm8k"
@@ -353,7 +520,15 @@ def main() -> None:
                                 )
                             logits_clean = model.compute_logits(h_clean, base_state, target_ids)
 
-                            h_i_mod = apply_intervention(h_clean, args.mode, args.sigma_scale)
+                            step_for_mean = node_to_intervention_step(node_i, numeric_nodes)
+                            h_i_mod = apply_intervention(
+                                h_clean,
+                                args.mode,
+                                args.sigma_scale,
+                                mu=mu,
+                                mu_by_step=mu_by_step,
+                                intervention_step=step_for_mean,
+                            )
                             ablt_out = model.rollout_from_step(h_i_mod, state_clean)
                             ablt_state = build_teacher_state(ablt_out, state_clean)
                             if ablt_state is None:
@@ -366,7 +541,15 @@ def main() -> None:
                             kl_logit_ht = compute_logit_kl_from_hidden_batch(model, h_clean, h_i_mod)
                         else:
                             h_i, state_i = model.forward_until_step(prompts, node_i)
-                            h_i_mod = apply_intervention(h_i, args.mode, args.sigma_scale)
+                            step_for_mean = node_to_intervention_step(node_i, numeric_nodes)
+                            h_i_mod = apply_intervention(
+                                h_i,
+                                args.mode,
+                                args.sigma_scale,
+                                mu=mu,
+                                mu_by_step=mu_by_step,
+                                intervention_step=step_for_mean,
+                            )
                             if isinstance(node_j, int):
                                 if not hasattr(model, "rollout_to_step"):
                                     raise AttributeError("Model lacks rollout_to_step required for causal graph.")
@@ -447,7 +630,25 @@ def main() -> None:
                             writer.write(json.dumps(record) + "\n")
             pbar.update(len(batch_samples))
 
-    # Save adjacency summary (single-rank only; multi-rank users should merge manually)
+    # All ranks finish the main loop and close shard writers before merge.
+    if dist is not None and world_size > 1:
+        dist.barrier()
+
+    # Merge rank shards first (fast I/O). Previously adjacency ran here only on rank 0; other
+    # ranks blocked at the next barrier while rank 0 did NumPy work, which could exceed Gloo's
+    # default monitoredBarrier timeout. Merging first yields the full jsonl before slow work.
+    if dist is not None and world_size > 1:
+        if rank == 0:
+            with output_path.open("w") as merged:
+                for r in range(world_size):
+                    shard_path = output_path.with_suffix(output_path.suffix + f".rank{r}")
+                    with shard_path.open("r") as shard:
+                        for line in shard:
+                            merged.write(line)
+                    shard_path.unlink(missing_ok=True)
+        dist.barrier()
+
+    # Save adjacency summary (single-rank only; uses this rank's adj_values, not merged file)
     if dist is None or rank == 0:
         node_to_idx = {n: idx for idx, n in enumerate(nodes)}
         edge_perc: Dict[str, Dict[tuple[Any, Any], List[float]]] = {k: {} for k in metric_keys}
@@ -464,17 +665,7 @@ def main() -> None:
             if args.save_adj:
                 np.save(output_path.with_suffix(f".{metric_key}.adj.npy"), adj_mat)
 
-    # Merge rank outputs
     if dist is not None and world_size > 1:
-        dist.barrier()
-        if rank == 0:
-            with output_path.open("w") as merged:
-                for r in range(world_size):
-                    shard_path = output_path.with_suffix(output_path.suffix + f".rank{r}")
-                    with shard_path.open("r") as shard:
-                        for line in shard:
-                            merged.write(line)
-                    shard_path.unlink(missing_ok=True)
         dist.barrier()
         dist.destroy_process_group()
 

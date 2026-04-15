@@ -6,7 +6,7 @@ PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}" && git rev-parse --show-tople
 
 ROOT="${PROJECT_ROOT}"
 INPUT_DIR="${ROOT}/outputs/rq2/latent_graph"
-OUT_DIR="${ROOT}/outputs/rq2/plots/latent_graph_grid"
+OUT_DIR="${ROOT}/outputs/rq2/plots/latent_graph_grid_kl_mean"
 
 eval "$(${CONDA_EXE:-conda} shell.bash hook)"
 conda activate ${R_ENV_NAME:-latentcot-r}

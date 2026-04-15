@@ -2,11 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}" && git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../../../.." && pwd)}"
 
-CONDA_ENV="coconut"
-CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
-NPROC=8                # >1 to enable torchrun
+CONDA_ENV="latentCoT"
+CUDA_VISIBLE_DEVICES="0,1,2,3"
+NPROC=4                # >1 to enable torchrun
 MASTER_PORT="${MASTER_PORT:-29520}"
 DIST_URL="env://"
 DIST_BACKEND="nccl"
@@ -38,6 +38,6 @@ ${LAUNCHER} experiments/rq3/stage1_mine_ambiguous.py \
   --config_path "${CONFIG}" \
   --output_dir "${OUTPUT_DIR}" \
   --latent_dropout 0.1 \
-  --batch_size 16 \
+  --batch_size 24 \
   --num_workers 8 \
   ${DIST_FLAGS}

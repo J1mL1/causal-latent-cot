@@ -90,7 +90,12 @@ summarize_steps <- function(df, label) {
 build_plot <- function(input_map, mode, title_label, color_map) {
   rows <- list()
   for (label in names(input_map)) {
-    df <- read_jsonl(input_map[[label]])
+    path <- input_map[[label]]
+    if (!file.exists(path)) {
+      warning("Skipping missing file: ", path)
+      next
+    }
+    df <- read_jsonl(path)
     if (!nrow(df)) next
     if (mode == "probe") {
       df <- compute_ss_probe(df)
@@ -102,23 +107,32 @@ build_plot <- function(input_map, mode, title_label, color_map) {
     rows[[length(rows) + 1]] <- summarize_steps(df, label)
   }
   plot_df <- bind_rows(rows)
-  plot_df$model <- factor(plot_df$model, levels = names(color_map))
+  present <- unique(as.character(plot_df$model))
+  plot_df$model <- factor(plot_df$model, levels = present)
 
   ggplot(plot_df, aes(x = step, y = mean, color = model, shape = model)) +
     geom_line(linewidth = 1.1) +
     geom_point(size = 2.8) +
     geom_ribbon(aes(ymin = mean - sem, ymax = mean + sem, fill = model), alpha = 0.15, color = NA) +
-    scale_color_manual(values = color_map, drop = FALSE) +
-    scale_fill_manual(values = color_map, drop = FALSE, guide = "none") +
+    scale_color_manual(values = color_map, breaks = present, limits = present, drop = FALSE) +
+    scale_fill_manual(values = color_map, breaks = present, limits = present, drop = FALSE, guide = "none") +
     scale_shape_manual(
       values = c(
         "Coconut-GPT2" = 17,
         "Coconut-Llama3-1B" = 17,
         "Coconut-Qwen3-4B" = 17,
+        "Coconut-GPT2-GSM8K" = 17,
+        "Coconut-Llama3-1B-GSM8K" = 17,
+        "Coconut-Qwen3-4B-GSM8K" = 17,
         "CODI-GPT2" = 16,
         "CODI-Llama3-1B" = 16,
-        "CODI-Qwen3-4B" = 16
+        "CODI-Qwen3-4B" = 16,
+        "CODI-GPT2-GSM8K" = 16,
+        "CODI-Llama3-1B-GSM8K" = 16,
+        "CODI-Qwen3-4B-GSM8K" = 16
       ),
+      breaks = present,
+      limits = present,
       drop = FALSE
     ) +
     scale_x_continuous(breaks = sort(unique(plot_df$step))) +
@@ -149,9 +163,15 @@ main <- function() {
     "Coconut-GPT2" = "#c6dbef",
     "Coconut-Llama3-1B" = "#6baed6",
     "Coconut-Qwen3-4B" = "#2171b5",
+    "Coconut-GPT2-GSM8K" = "#c6dbef",
+    "Coconut-Llama3-1B-GSM8K" = "#6baed6",
+    "Coconut-Qwen3-4B-GSM8K" = "#2171b5",
     "CODI-GPT2" = "#fcbba1",
     "CODI-Llama3-1B" = "#fb6a4a",
-    "CODI-Qwen3-4B" = "#cb181d"
+    "CODI-Qwen3-4B" = "#cb181d",
+    "CODI-GPT2-GSM8K" = "#fcbba1",
+    "CODI-Llama3-1B-GSM8K" = "#fb6a4a",
+    "CODI-Qwen3-4B-GSM8K" = "#cb181d"
   )
 
   extract_legend <- function(p) {
@@ -171,20 +191,21 @@ main <- function() {
     }
     main <- p_left + p_right + plot_layout(guides = "keep")
     legend_row <- wrap_elements(legend) + theme(plot.margin = margin(0, 0, 0, 0))
-    main / legend_row + plot_layout(heights = c(1, 0.28))
+    legend_h <- if (legend_nrow >= 3) 0.36 else 0.28
+    main / legend_row + plot_layout(heights = c(1, legend_h))
   }
 
   p_probe_legend_src <- build_plot(opts$probe_inputs, "probe", "metric: probe", color_map) +
-    guides(color = guide_legend(nrow = 2, byrow = TRUE),
-           shape = guide_legend(nrow = 2, byrow = TRUE))
+    guides(color = guide_legend(nrow = 3, byrow = TRUE),
+           shape = guide_legend(nrow = 3, byrow = TRUE))
   p_probe <- p_probe_legend_src + theme(legend.position = "none")
   p_tf <- build_plot(opts$tf_inputs, "teacher", "metric: teacher-forced logp", color_map) +
     theme(legend.position = "none")
-  p <- assemble_with_legend(p_probe, p_tf, p_probe_legend_src, legend_nrow = 2)
+  p <- assemble_with_legend(p_probe, p_tf, p_probe_legend_src, legend_nrow = 3)
 
   out_dir <- dirname(opts$out_path)
   if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
-  ggsave(opts$out_path, p, width = 6.25, height = 2.2, dpi = 300, bg = "white")
+  ggsave(opts$out_path, p, width = 6.25, height = 2.45, dpi = 300, bg = "white")
 }
 
 main()

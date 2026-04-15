@@ -2,11 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}" && git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../../../.." && pwd)}"
 
 CUDA_VISIBLE_DEVICES="0,1,2,3"
 NPROC=4
-BATCH_SIZE=8
+BATCH_SIZE=16
 DIST_URL="env://"
 DIST_BACKEND="nccl"
 
@@ -16,6 +16,14 @@ OUT_JSONL="outputs/rq3/coconut_qwen3_4b-strategyqa/projection_scores.jsonl"
 export CUDA_VISIBLE_DEVICES
 export CUDA_LAUNCH_BLOCKING=1
 CONFIG="configs/rq3/superposition_coconut_qwen3_4b_strategyqa.yaml"
+
+
+cd "${PROJECT_ROOT}"
+if [ -z "${PYTHONPATH-}" ]; then
+  export PYTHONPATH="$(pwd)"
+else
+  export PYTHONPATH="$(pwd):${PYTHONPATH}"
+fi
 
 if [ "${NPROC}" -gt 1 ]; then
   LAUNCHER="torchrun --nproc_per_node=${NPROC}"

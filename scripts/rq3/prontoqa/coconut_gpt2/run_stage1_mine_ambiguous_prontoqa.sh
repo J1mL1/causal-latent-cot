@@ -2,9 +2,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}" && git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../../../.." && pwd)}"
 
-CONDA_ENV="coconut"
+CONDA_ENV="latentCoT"
 CUDA_VISIBLE_DEVICES="0,1,2,3"
 NPROC=4                # >1 to enable torchrun
 MASTER_PORT="${MASTER_PORT:-29520}"
@@ -38,6 +38,6 @@ ${LAUNCHER} experiments/rq3/stage1_collect_tf.py \
   --config_path "${CONFIG}" \
   --output_dir "${OUTPUT_DIR}" \
   --latent_dropout 0.1 \
-  --batch_size 1 \
+  --batch_size 4 \
   --num_workers 8 \
   ${DIST_FLAGS}

@@ -13,6 +13,8 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
+from data.gsm8k import parse_answer as gsm8k_parse_answer
+
 
 def load_jsonl(path: Path) -> List[Dict]:
     records = []
@@ -107,6 +109,35 @@ def sigmoid(x: float) -> float:
     return z / (1.0 + z)
 
 
+def _gsm8k_norm_answer(text: Any) -> Optional[str]:
+    """Normalize GSM8K answers the same way as stage1 mining."""
+    if text is None:
+        return None
+    val, _ = gsm8k_parse_answer(str(text))
+    return str(val) if val is not None else None
+
+
+def _model_param_dtype(model: Any) -> torch.dtype:
+    """Match loaded trajectories (often float32 numpy) to backbone dtype (e.g. float16 GPT2)."""
+    # Prefer backbone / LM weights over LoRA adapters (often fp32) so latent tensors match compute.
+    inner = getattr(model, "base_model", None)
+    if inner is not None:
+        p0 = next(inner.parameters(), None)
+        if p0 is not None:
+            return p0.dtype
+    inner = getattr(model, "model", None)
+    if inner is not None:
+        codi = getattr(inner, "codi", None)
+        if codi is not None:
+            p0 = next(codi.parameters(), None)
+            if p0 is not None:
+                return p0.dtype
+    p = next(model.parameters(), None)
+    if p is not None:
+        return p.dtype
+    return torch.float32
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="RQ3 Stage 3: projection analysis.")
     parser.add_argument("--samples_jsonl", required=True)
@@ -128,7 +159,11 @@ def main() -> None:
     parser.add_argument("--tf_use_latent_path", action="store_true", default=True, help="Rebuild cache per trajectory using latent_path.")
     parser.add_argument("--tf_no_latent_path", dest="tf_use_latent_path", action="store_false", help="Ignore latent_path and reuse prompt-only cache.")
     parser.add_argument("--tf_steps", default="1,2,3,4,5,6")
-    parser.add_argument("--tf_answers", default=None, help="Override answers, e.g., Yes,No or True,False")
+    parser.add_argument(
+        "--tf_answers",
+        default=None,
+        help="Fixed pair for teacher-forcing (e.g. Yes,No). On gsm8k, omit this to score gold vs the other ambiguous answer.",
+    )
     parser.add_argument("--tf_deltas", default="0.4,0.5")
     parser.add_argument("--tf_debug_samples", type=int, default=5)
     parser.add_argument("--tf_debug_topk", type=int, default=5)
@@ -149,14 +184,14 @@ def main() -> None:
             local_rank = int(os.environ.get("LOCAL_RANK", "0"))
         rank = int(os.environ.get("RANK", "0"))
         world_size = int(os.environ.get("WORLD_SIZE", "1"))
+        if torch.cuda.is_available():
+            torch.cuda.set_device(local_rank)
         dist.init_process_group(
             backend=args.dist_backend,
             init_method=args.dist_url,
             world_size=world_size,
             rank=rank,
         )
-        if torch.cuda.is_available():
-            torch.cuda.set_device(local_rank)
 
     samples = {r["sample_id"]: r for r in load_jsonl(Path(args.samples_jsonl))}
     probes = {r["sample_id"]: r for r in load_jsonl(Path(args.probes_jsonl))}
@@ -286,23 +321,34 @@ def main() -> None:
 
     tf_steps = _parse_csv_ints(args.tf_steps)
     tf_deltas = _parse_csv_floats(args.tf_deltas)
-    if args.tf_answers:
-        answer_list = [a.strip() for a in str(args.tf_answers).split(",") if a.strip()]
-    else:
-        answer_list = ["yes", "no"]
-        if "codi" in model_name:
-            answer_list = ["True", "False"]
-    if len(answer_list) != 2:
-        raise ValueError("--tf_answers must provide exactly two answers, e.g., Yes,No")
-    ans_pos, ans_neg = answer_list
-    target_yes = prepare_target_ids(model, ans_pos, False)
-    target_no = prepare_target_ids(model, ans_neg, False)
-    if target_yes is None or target_no is None:
-        raise RuntimeError("Failed to build target ids for teacher-forced answers.")
+    if not tf_steps:
+        raise ValueError(
+            f"--tf_steps resolved to empty list (raw={args.tf_steps!r}); cannot write per-step TF records."
+        )
+    dataset_name = str(config.get("dataset_name", ""))
+    use_tf_gsm8k_pairs = dataset_name.lower() == "gsm8k" and not args.tf_answers
+
+    target_yes: Optional[torch.Tensor] = None
+    target_no: Optional[torch.Tensor] = None
+    ans_pos = ""
+    ans_neg = ""
+    if not use_tf_gsm8k_pairs:
+        if args.tf_answers:
+            answer_list = [a.strip() for a in str(args.tf_answers).split(",") if a.strip()]
+        else:
+            answer_list = ["yes", "no"]
+            if "codi" in model_name:
+                answer_list = ["True", "False"]
+        if len(answer_list) != 2:
+            raise ValueError("--tf_answers must provide exactly two answers, e.g., Yes,No")
+        ans_pos, ans_neg = answer_list
+        target_yes = prepare_target_ids(model, ans_pos, False)
+        target_no = prepare_target_ids(model, ans_neg, False)
+        if target_yes is None or target_no is None:
+            raise RuntimeError("Failed to build target ids for teacher-forced answers.")
 
     tf_path = Path(args.tf_output_jsonl)
     tf_path.parent.mkdir(parents=True, exist_ok=True)
-    dataset_name = str(config.get("dataset_name", ""))
     debug_limit = max(0, int(args.tf_debug_samples))
     debug_topk = max(1, int(args.tf_debug_topk))
     debug_count = 0
@@ -320,15 +366,29 @@ def main() -> None:
         prompt = data.get("prompt")
         if not prompt:
             continue
-        tf_recs.append(
-            {
-                "rec": rec,
-                "prompt": prompt,
-                "gold_answer": data.get("answer_clean") or data.get("answer") or sample.get("gold_answer"),
-                "sample_uid": sample_uid,
-                "latent_path": rec.get("latent_path"),
-            }
-        )
+        gold_raw = data.get("answer_clean") or data.get("answer") or sample.get("gold_answer")
+        row: Dict[str, Any] = {
+            "rec": rec,
+            "prompt": prompt,
+            "gold_answer": gold_raw,
+            "sample_uid": sample_uid,
+            "latent_path": rec.get("latent_path"),
+            "tf_use_gsm8k_pair": False,
+        }
+        if use_tf_gsm8k_pairs:
+            a = sample.get("answer_A")
+            b = sample.get("answer_B")
+            ggold = _gsm8k_norm_answer(gold_raw)
+            if a is None or b is None or ggold is None:
+                continue
+            if ggold == a:
+                row["tf_pos_text"], row["tf_neg_text"] = a, b
+            elif ggold == b:
+                row["tf_pos_text"], row["tf_neg_text"] = b, a
+            else:
+                continue
+            row["tf_use_gsm8k_pair"] = True
+        tf_recs.append(row)
 
     def _clone_state(state: Dict[str, Any]) -> Dict[str, Any]:
         try:
@@ -349,9 +409,12 @@ def main() -> None:
         return _clone_state(cached)
 
     rank_tf = tf_path if dist is None else tf_path.with_suffix(tf_path.suffix + f".rank{rank}")
+    latent_load_warn = 0
+    latent_load_warn_cap = 5
     with rank_tf.open("w") as tf_writer:
         for i in tqdm(range(0, len(tf_recs), max(1, args.batch_size)), desc="tf-competition", total=math.ceil(len(tf_recs) / max(1, args.batch_size)), disable=rank != 0):
             batch = tf_recs[i : i + max(1, args.batch_size)]
+            batch_gsm8k = any(bool(entry.get("tf_use_gsm8k_pair")) for entry in batch)
             prompts = [b["prompt"] for b in batch]
             delta_maps = [dict() for _ in batch]
             traj_runtime = []
@@ -362,9 +425,21 @@ def main() -> None:
                     if latent_path:
                         try:
                             latent_np = np.load(latent_path)
-                            latent_tensor = torch.from_numpy(latent_np).to(model.device)
-                        except Exception:
+                            latent_tensor = torch.from_numpy(latent_np).to(
+                                device=model.device,
+                                dtype=_model_param_dtype(model),
+                            )
+                        except Exception as exc:
                             latent_tensor = None
+                            if (
+                                rank == 0
+                                and latent_load_warn < latent_load_warn_cap
+                            ):
+                                latent_load_warn += 1
+                                print(
+                                    f"[tf-warn] latent load failed ({latent_path}): {exc!r}",
+                                    flush=True,
+                                )
                     state = None
                     if latent_tensor is not None:
                         state = _get_base_state(entry["prompt"], entry["sample_uid"])
@@ -375,6 +450,15 @@ def main() -> None:
                         }
                     )
             for step in tf_steps:
+                logp_yes_all: Optional[torch.Tensor] = None
+                logp_no_all: Optional[torch.Tensor] = None
+                target_yes_batch: Optional[torch.Tensor] = None
+                target_no_batch: Optional[torch.Tensor] = None
+                logits_yes: Optional[torch.Tensor] = None
+                logits_no: Optional[torch.Tensor] = None
+                h_t: Optional[torch.Tensor] = None
+                state: Any = None
+                per_states: Any = None
                 if args.tf_use_latent_path:
                     per_states = True
                 else:
@@ -382,7 +466,7 @@ def main() -> None:
                         h_t, state = model.forward_until_step(prompts, step)
                     per_states = state.get("per_sample_states") if isinstance(state, dict) else None
                     # Batch path: compute logits once when the state is shared across the batch.
-                    if per_states is None:
+                    if per_states is None and not batch_gsm8k and target_yes is not None and target_no is not None:
                         batch_size = h_t.size(0)
                         target_yes_batch = target_yes
                         target_no_batch = target_no
@@ -408,6 +492,18 @@ def main() -> None:
                     cluster = rec.get("cluster")
                     sample_uid = entry["sample_uid"]
                     gold_answer = entry["gold_answer"]
+                    if entry.get("tf_use_gsm8k_pair"):
+                        target_pos = prepare_target_ids(model, entry["tf_pos_text"], True)
+                        target_neg = prepare_target_ids(model, entry["tf_neg_text"], True)
+                        if target_pos is None or target_neg is None:
+                            continue
+                        lab_pos, lab_neg = str(entry["tf_pos_text"]), str(entry["tf_neg_text"])
+                    else:
+                        target_pos = target_yes
+                        target_neg = target_no
+                        lab_pos, lab_neg = ans_pos, ans_neg
+                    if target_pos is None or target_neg is None:
+                        continue
                     if args.tf_use_latent_path:
                         runtime = traj_runtime[idx]
                         latent_tensor = runtime.get("latent")
@@ -420,19 +516,25 @@ def main() -> None:
                         with torch.no_grad():
                             h_i, state_i = model.rollout_to_step(h_i, state_i, target_step=step)
                         runtime["state"] = state_i
-                        logp_yes = _logp_for_answer(model, h_i, state_i, target_yes)
-                        logp_no = _logp_for_answer(model, h_i, state_i, target_no)
+                        logp_yes = _logp_for_answer(model, h_i, state_i, target_pos)
+                        logp_no = _logp_for_answer(model, h_i, state_i, target_neg)
                     else:
-                        if per_states is None:
+                        assert h_t is not None and state is not None
+                        if per_states is None and not batch_gsm8k and logp_yes_all is not None and logp_no_all is not None:
                             logp_yes = float(logp_yes_all[idx].item())
                             logp_no = float(logp_no_all[idx].item())
                             state_i = state
                             h_i = h_t[idx : idx + 1]
+                        elif per_states is None and batch_gsm8k:
+                            state_i = state
+                            h_i = h_t[idx : idx + 1]
+                            logp_yes = _logp_for_answer(model, h_i, state_i, target_pos)
+                            logp_no = _logp_for_answer(model, h_i, state_i, target_neg)
                         else:
                             state_i = per_states[idx]
                             h_i = h_t[idx : idx + 1]
-                            logp_yes = _logp_for_answer(model, h_i, state_i, target_yes)
-                            logp_no = _logp_for_answer(model, h_i, state_i, target_no)
+                            logp_yes = _logp_for_answer(model, h_i, state_i, target_pos)
+                            logp_no = _logp_for_answer(model, h_i, state_i, target_neg)
                     # Debug: show top-k probs for the last target position for first few samples.
                     if debug_count < debug_limit and rank == 0:
                         def _topk_info(target_ids: torch.Tensor, label: str, logits_override: torch.Tensor | None) -> None:
@@ -472,18 +574,18 @@ def main() -> None:
                                 print(f"[tf-debug]   {tok}: {val:.6f}")
 
                         if args.tf_use_latent_path:
-                            _topk_info(target_yes, ans_pos, None)
-                            _topk_info(target_no, ans_neg, None)
+                            _topk_info(target_pos, lab_pos, None)
+                            _topk_info(target_neg, lab_neg, None)
                         else:
                             _topk_info(
-                                target_yes_batch if per_states is None else target_yes,
-                                ans_pos,
-                                logits_yes if per_states is None else None,
+                                target_yes_batch if per_states is None and not batch_gsm8k else target_pos,
+                                lab_pos,
+                                logits_yes if per_states is None and not batch_gsm8k else None,
                             )
                             _topk_info(
-                                target_no_batch if per_states is None else target_no,
-                                ans_neg,
-                                logits_no if per_states is None else None,
+                                target_no_batch if per_states is None and not batch_gsm8k else target_neg,
+                                lab_neg,
+                                logits_no if per_states is None and not batch_gsm8k else None,
                             )
                         debug_count += 1
                     max_lp = max(logp_yes, logp_no)
@@ -493,27 +595,26 @@ def main() -> None:
                     ss = min(s_yes, s_no)
                     delta_p = abs(s_yes - s_no)
                     delta_maps[idx][step] = delta_p
-                    tf_writer.write(
-                        json.dumps(
-                            {
-                                "sample_id": sid,
-                                "traj_id": traj_id,
-                                "cluster": cluster,
-                                "sample_uid": sample_uid,
-                                "dataset": dataset_name,
-                                "gold_answer": gold_answer,
-                                "step": step,
-                                "logp_yes": logp_yes,
-                                "logp_no": logp_no,
-                                "s_yes": s_yes,
-                                "s_no": s_no,
-                                "ss": ss,
-                                "delta_p": delta_p,
-                                "record_type": "per_step",
-                            }
-                        )
-                        + "\n"
-                    )
+                    per_step: Dict[str, Any] = {
+                        "sample_id": sid,
+                        "traj_id": traj_id,
+                        "cluster": cluster,
+                        "sample_uid": sample_uid,
+                        "dataset": dataset_name,
+                        "gold_answer": gold_answer,
+                        "step": step,
+                        "logp_yes": logp_yes,
+                        "logp_no": logp_no,
+                        "s_yes": s_yes,
+                        "s_no": s_no,
+                        "ss": ss,
+                        "delta_p": delta_p,
+                        "record_type": "per_step",
+                    }
+                    if entry.get("tf_use_gsm8k_pair"):
+                        per_step["tf_gold_answer"] = lab_pos
+                        per_step["tf_wrong_answer"] = lab_neg
+                    tf_writer.write(json.dumps(per_step) + "\n")
 
             # summary per trajectory
             for entry, delta_p_by_step in zip(batch, delta_maps):
@@ -545,6 +646,17 @@ def main() -> None:
                         )
                         + "\n"
                     )
+
+            if use_tf_gsm8k_pairs and batch and all(len(dm) == 0 for dm in delta_maps):
+                if rank == 0:
+                    print(
+                        "[tf-warn] wrote no per_step rows for this batch (delta_maps empty). "
+                        "If this repeats, try --tf_no_latent_path or fix latent_path loads.",
+                        flush=True,
+                    )
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     if dist is not None and world_size > 1:
         dist.barrier()

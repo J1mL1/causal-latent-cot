@@ -9,8 +9,8 @@ export NCCL_ASYNC_ERROR_HANDLING=1
 export TORCH_DISTRIBUTED_DEBUG=DETAIL
 
 # === Editable parameters ===
-CONDA_ENV="coconut"
-CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
+CONDA_ENV="latentCoT"
+CUDA_VISIBLE_DEVICES="0,1,2,3"
 NPROC=4                # >1 to enable torchrun
 BATCH_SIZE=32
 NUM_WORKERS=0

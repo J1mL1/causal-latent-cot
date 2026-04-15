@@ -28,6 +28,6 @@ fi
 
 # torchrun --master_port 29555 --nnodes 1 --nproc_per_node 4 run.py ${PROJECT_ROOT}/external/coconut/args/strategyqa_coconut_gpt2.yaml
 
-torchrun --master_port 29555 --nnodes 1 --nproc_per_node 4 run.py ${PROJECT_ROOT}/external/coconut/args/commonsenseqa_coconut_qwen4b.yaml
+torchrun --nnodes 1 --nproc_per_node 4 run.py ${PROJECT_ROOT}/external/coconut/args/gsm_coconut_qwen3.5_9b.yaml
 
 # torchrun --master_port 29555 --nnodes 1 --nproc_per_node 4 run.py ${PROJECT_ROOT}/external/coconut/args/strategyqa_coconut_qwen4b.yaml

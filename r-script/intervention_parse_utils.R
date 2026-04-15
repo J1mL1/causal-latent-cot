@@ -22,6 +22,18 @@ to_list_col <- function(x, n_rows) {
   return(rep(list(NULL), n_rows))
 }
 
+#' Resolve intervention output column: `run_step_intervention` writes `intervened`;
+#' some JSONL exports only contain `ablated` (same structure: list/df with `text`).
+get_intervened_column_df <- function(df) {
+  if ("intervened" %in% names(df)) {
+    return(df[["intervened"]])
+  }
+  if ("ablated" %in% names(df)) {
+    return(df[["ablated"]])
+  }
+  NULL
+}
+
 get_text_field <- function(x, idx = 0) {
   if (is.null(x)) return(NA_character_)
   if (is.data.frame(x) && "text" %in% names(x)) {

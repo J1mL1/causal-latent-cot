@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}" && git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 
-CONDA_ENV="codi"
+CONDA_ENV="latentCoT"
 BATCH_SIZE=1
 NUM_WORKERS=2
 CONFIG="configs/rq2/explicit/cot-qwen3-8b.yaml"

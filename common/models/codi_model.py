@@ -167,7 +167,57 @@ class CodiWrapper(LatentReasoningModel):
         tokenizer_name = config.get("tokenizer_name_or_path", model_args.model_name_or_path)
         self.tokenizer = getattr(self.model, "tokenizer", None)
         if self.tokenizer is None:
-            self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
+            tok_kw: Dict[str, Any] = dict(trust_remote_code=True)
+            if config.get("tokenizer_use_fast") is False:
+                tok_kw["use_fast"] = False
+                self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, **tok_kw)
+            else:
+                try:
+                    self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, **tok_kw)
+                except Exception as exc_fast:
+                    import warnings
+
+                    path_lower = str(tokenizer_name).lower()
+                    llama_like = any(
+                        k in path_lower
+                        for k in (
+                            "llama",
+                            "mistral",
+                            "qwen",
+                            "gemma",
+                            "phi",
+                            "falcon",
+                        )
+                    )
+                    if llama_like:
+                        try:
+                            import tokenizers as _tok  # noqa: F401
+
+                            _tv = getattr(_tok, "__version__", "?")
+                        except Exception:
+                            _tv = "?"
+                        raise RuntimeError(
+                            "Fast tokenizer failed; Llama/Qwen-style checkpoints often cannot "
+                            "use use_fast=False. Upgrade tokenizers/transformers in this env, e.g.\n"
+                            "  pip install -U 'tokenizers>=0.21' 'transformers>=4.44'\n"
+                            f"(tokenizers={_tv}). Original: {exc_fast!r}"
+                        ) from exc_fast
+                    warnings.warn(
+                        f"Fast tokenizer load failed ({type(exc_fast).__name__}: {exc_fast}); "
+                        "retrying with use_fast=False.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    try:
+                        self.tokenizer = AutoTokenizer.from_pretrained(
+                            tokenizer_name, use_fast=False, **tok_kw
+                        )
+                    except Exception as exc_slow:
+                        raise RuntimeError(
+                            "Both fast and slow tokenizer loading failed. "
+                            "Try: pip install -U tokenizers transformers. "
+                            f"Fast: {exc_fast!r} Slow: {exc_slow!r}"
+                        ) from exc_slow
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         if getattr(self.model, "tokenizer", None) is None:
@@ -176,6 +226,14 @@ class CodiWrapper(LatentReasoningModel):
         self.num_latent = int(train_args.num_latent)
         self.use_prj = bool(train_args.use_prj)
         self.generation_kwargs = config.get("generation_kwargs", {})
+
+    def _clamp_ids_to_embedding(self, ids: torch.Tensor) -> torch.Tensor:
+        """CODI resizes embeddings to ori_vocab+3; tokenizer ids must stay in [0, num_embeddings)."""
+        emb = self.model.codi.get_input_embeddings()
+        n = int(emb.num_embeddings)
+        if n <= 0:
+            return ids
+        return ids.clamp(0, n - 1)
 
     def _prepare_inputs(self, inputs: Any) -> Dict[str, torch.Tensor]:
         if isinstance(inputs, (list, tuple)):
@@ -217,6 +275,7 @@ class CodiWrapper(LatentReasoningModel):
         tokens["attention_mask"] = torch.cat(
             (tokens["attention_mask"], torch.ones_like(concat)), dim=1
         )
+        tokens["input_ids"] = self._clamp_ids_to_embedding(tokens["input_ids"].long())
         # Finally, move tensors to device
         tokens = {
             k: v.to(self.device) if isinstance(v, torch.Tensor) else v
@@ -510,7 +569,8 @@ class CodiWrapper(LatentReasoningModel):
         if eos_id is not None:
             eos_tensor = torch.tensor([[eos_id]], device=ids.device)
             ids = torch.cat([ids, eos_tensor], dim=-1)
-        return ids.to(self.device)
+        ids = ids.to(self.device)
+        return self._clamp_ids_to_embedding(ids.long())
 
     def logits_from_latent(self, h_t: torch.Tensor) -> torch.Tensor:
         """
@@ -519,7 +579,9 @@ class CodiWrapper(LatentReasoningModel):
         """
         if not hasattr(self.model.codi, "lm_head"):
             raise AttributeError("codi model lacks lm_head for logit lens.")
-        return self.model.codi.lm_head(h_t)
+        head = self.model.codi.lm_head
+        h = h_t.to(dtype=head.weight.dtype)
+        return head(h)
 
     def decode_from_state(self, h_t: torch.Tensor, other_state: Dict[str, Any]) -> Any:
         """
@@ -550,12 +612,17 @@ class CodiWrapper(LatentReasoningModel):
         # teacher-force the gold tokens so positions align with free decoding.
         training_args = self.model.training_args
         if getattr(training_args, "remove_eos", False):
-            eot_ids = torch.tensor([self.model.eot_id], device=self.device)
+            eot_ids = torch.tensor([self.model.eot_id], device=self.device, dtype=torch.long)
         else:
+            eos_tid = self.tokenizer.eos_token_id
+            if eos_tid is None:
+                eos_tid = self.model.eot_id
             eot_ids = torch.tensor(
-                [self.model.eot_id, self.tokenizer.eos_token_id],
+                [self.model.eot_id, int(eos_tid)],
                 device=self.device,
+                dtype=torch.long,
             )
+        eot_ids = self._clamp_ids_to_embedding(eot_ids)
         eot_emb = self.model.get_embd(self.model.codi, self.model.model_name)(eot_ids).unsqueeze(0)
         eot_emb = eot_emb.expand(target_ids.size(0), -1, -1)
 
@@ -570,7 +637,7 @@ class CodiWrapper(LatentReasoningModel):
         if target_ids.size(1) == 1:
             return first_logit.unsqueeze(1)
 
-        input_ids = target_ids[:, :-1]
+        input_ids = self._clamp_ids_to_embedding(target_ids[:, :-1].long())
 
         past_seq_len = None
         try:

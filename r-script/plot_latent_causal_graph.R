@@ -246,6 +246,8 @@ plot_latent_graph <- function(steps, kl_tbl, out_png, pct = 70, topk = 2,
                     x = x2, y = y2, t = 3L)
   )
 
+  # Symmetric horizontal padding around nodes (tight to reduce empty canvas).
+  x_pad <- 0.30
   p <- ggplot() +
     ggforce::geom_bezier(
       data = bezier_pts,
@@ -286,8 +288,9 @@ plot_latent_graph <- function(steps, kl_tbl, out_png, pct = 70, topk = 2,
       size = "none"
     ) +
     coord_cartesian(
-      xlim = c(0.3, max(nodes$x) + 0.7),
-      ylim = c(-0.85, 1.45),
+      xlim = c(min(nodes$x) - x_pad, max(nodes$x) + x_pad),
+      # Vertical margin for Bezier arcs; keep minimal to reduce top/bottom white band.
+      ylim = c(-1.02, 1.62),
       expand = FALSE
     ) +
     theme_void(base_size = 14) +
@@ -297,13 +300,17 @@ plot_latent_graph <- function(steps, kl_tbl, out_png, pct = 70, topk = 2,
       legend.background = element_rect(fill = "white", colour = NA),
       legend.position = "bottom",
       legend.box = "horizontal",
-      plot.title = element_text(face = "bold", size = 22, margin = margin(b = 6), hjust = 0.5),
-      plot.margin = margin(6, 6, 4, 6),
+      plot.title = element_text(face = "bold", size = 22, margin = margin(b = 2), hjust = 0.5),
+      # Tight outer margins (pt) to reduce PNG white border.
+      plot.margin = margin(1, 1, 0.5, 1),
       legend.title = element_text(size = 26),
       legend.text = element_text(size = 20),
-      legend.box.spacing = unit(0.05, "lines"),
+      legend.box.spacing = unit(0, "lines"),
       legend.margin = margin(0, 0, 0, 0),
-      legend.justification = c(0.47, 0.5),
+      legend.box.margin = margin(0, 0, 0, 0),
+      legend.spacing.x = unit(0, "pt"),
+      legend.spacing.y = unit(0, "pt"),
+      legend.justification = "center",
       legend.box.just = "center",
       legend.title.align = 0.5
     ) +
@@ -315,7 +322,7 @@ plot_latent_graph <- function(steps, kl_tbl, out_png, pct = 70, topk = 2,
     p <- p + theme(plot.title = element_blank()) + labs(title = NULL)
   }
 
-  ggsave(out_png, p, width = 12.8, height = 4.2, dpi = 320, bg = "white")
+  ggsave(out_png, p, width = 12.8, height = 5.25, dpi = 320, bg = "white")
 }
 
 run_all <- function(jsonl_path, prefix, metric, answer_metric, pct = 70, topk = 2,

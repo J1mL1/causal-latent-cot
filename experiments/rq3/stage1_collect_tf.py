@@ -244,14 +244,14 @@ def main() -> None:
             local_rank = int(os.environ.get("LOCAL_RANK", "0"))
         rank = int(os.environ.get("RANK", "0"))
         world_size = int(os.environ.get("WORLD_SIZE", "1"))
+        if torch.cuda.is_available():
+            torch.cuda.set_device(local_rank)
         dist.init_process_group(
             backend=args.dist_backend,
             init_method=args.dist_url,
             world_size=world_size,
             rank=rank,
         )
-        if torch.cuda.is_available():
-            torch.cuda.set_device(local_rank)
 
     model_cfg = config.get("model", {})
     if dist is not None:
@@ -344,7 +344,7 @@ def main() -> None:
                     if args.latent_dropout > 0:
                         h_t = F.dropout(h_t, p=args.latent_dropout, training=True)
                     for idx in range(len(valid)):
-                        h_lists[idx].append(h_t[idx].detach().cpu().numpy())
+                        h_lists[idx].append(h_t[idx].detach().float().cpu().numpy())
                 for idx, (_, entry) in enumerate(valid):
                     latent_arr = np.stack(h_lists[idx], axis=0)
                     sample_id = entry["sample_id"]

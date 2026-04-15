@@ -158,7 +158,9 @@ class HFAutoregressiveModel(LatentReasoningModel):
     def logits_from_latent(self, h_t: torch.Tensor) -> torch.Tensor:
         if not hasattr(self.model, "lm_head"):
             raise AttributeError("Model lacks lm_head for projecting latents.")
-        return self.model.lm_head(h_t)
+        head = self.model.lm_head
+        h = h_t.to(dtype=head.weight.dtype)
+        return head(h)
 
     def decode_from_state(
         self, h_t: torch.Tensor, other_state: Dict[str, Any]

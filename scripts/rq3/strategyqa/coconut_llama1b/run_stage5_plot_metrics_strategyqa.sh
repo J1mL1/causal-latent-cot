@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}" && git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../../../.." && pwd)}"
 
 ROOT_DIR="${PROJECT_ROOT}"
 PROJECTION_JSONL="${PROJECTION_JSONL:-${ROOT_DIR}/outputs/rq3/coconut_llama1b-strategyqa/projection_scores.jsonl}"

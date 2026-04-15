@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple, Union
 import os
+import warnings
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -9,6 +10,7 @@ from transformers.cache_utils import DynamicCache
 
 from common.model_interface import LatentReasoningModel
 from common.model_registry import register_model
+from common.path_utils import resolve_pretrained_source
 from external.coconut.coconut import Coconut
 
 
@@ -35,6 +37,12 @@ class CoconutWrapper(LatentReasoningModel):
         self.num_latent_placeholders: int = 0
         self.use_coconut_question_only: bool = False
         self.align_latent_padding: bool = False
+
+    def _base_model_dtype(self) -> torch.dtype:
+        """Dtype of backbone weights (embeddings must match for GPT2/Llama LayerNorm)."""
+        if self.base_model is None:
+            return torch.float32
+        return next(self.base_model.parameters()).dtype
 
     def _ensure_cache(self, past_key_values: Any) -> Any:
         """Convert legacy tuple/list caches to the HF Cache interface."""
@@ -65,14 +73,71 @@ class CoconutWrapper(LatentReasoningModel):
         tokenizer_name = config.get("tokenizer_name_or_path", base_path)
         self.device = torch.device(config.get("device", self.device))
         self.teacher_target_template = config.get("teacher_target_template", self.teacher_target_template)
+        base_path, base_local = resolve_pretrained_source(base_path)
+        tok_path, tok_local = resolve_pretrained_source(tokenizer_name)
         self.base_model = AutoModelForCausalLM.from_pretrained(
-            base_path, trust_remote_code=True
+            base_path,
+            trust_remote_code=True,
+            local_files_only=base_local,
         ).to(self.device)
         # Disable dropout for reproducible logits during teacher-forcing/interventions.
         self.base_model.eval()
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            tokenizer_name, trust_remote_code=True
+        tok_kwargs: Dict[str, Any] = dict(
+            trust_remote_code=True,
+            local_files_only=tok_local,
         )
+        if config.get("tokenizer_use_fast") is False:
+            tok_kwargs["use_fast"] = False
+            self.tokenizer = AutoTokenizer.from_pretrained(tok_path, **tok_kwargs)
+        else:
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(tok_path, **tok_kwargs)
+            except Exception as exc_fast:
+                path_lower = str(tok_path).lower()
+                # Llama/Qwen/Mistral checkpoints often only ship tokenizer.json for the *fast* path;
+                # use_fast=False can hit NotImplementedError in get_vocab() on some transformers versions.
+                llama_like = any(
+                    k in path_lower
+                    for k in (
+                        "llama",
+                        "mistral",
+                        "qwen",
+                        "gemma",
+                        "phi",
+                        "falcon",
+                    )
+                )
+                if llama_like:
+                    try:
+                        import tokenizers as _tok  # noqa: F401
+
+                        _tv = getattr(_tok, "__version__", "?")
+                    except Exception:
+                        _tv = "?"
+                    raise RuntimeError(
+                        "Fast tokenizer failed (Rust tokenizers JSON incompatible with your "
+                        "`tokenizers` build — e.g. 'ModelWrapper' parse error). "
+                        "Many Llama/Qwen checkpoints cannot fall back to a working slow tokenizer. "
+                        "Upgrade in the same env you use for torchrun, e.g.\n"
+                        "  pip install -U 'tokenizers>=0.21' 'transformers>=4.44'\n"
+                        f"(current tokenizers={_tv}). Original error: {exc_fast!r}"
+                    ) from exc_fast
+                warnings.warn(
+                    f"Fast tokenizer load failed ({type(exc_fast).__name__}: {exc_fast}); "
+                    "retrying with use_fast=False.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                try:
+                    self.tokenizer = AutoTokenizer.from_pretrained(
+                        tok_path, use_fast=False, **tok_kwargs
+                    )
+                except Exception as exc_slow:
+                    raise RuntimeError(
+                        "Both fast and slow tokenizer loading failed. "
+                        "Try: pip install -U tokenizers transformers. "
+                        f"Fast: {exc_fast!r} Slow: {exc_slow!r}"
+                    ) from exc_slow
         self.generation_kwargs = config.get("generation_kwargs", {})
         self.num_latent_placeholders = int(config.get("num_latent_placeholders", 0))
         self.use_coconut_question_only = bool(config.get("use_coconut_question_only", False))
@@ -567,7 +632,10 @@ class CoconutWrapper(LatentReasoningModel):
                     "first_logit": first_logit,
                 }
                 h_batch = torch.zeros(
-                    input_ids.size(0), hidden_states.size(-1), device=self.device
+                    input_ids.size(0),
+                    hidden_states.size(-1),
+                    device=self.device,
+                    dtype=hidden_states.dtype,
                 )
                 for idx, (batch_idx, _) in enumerate(filling_indices):
                     h_batch[batch_idx] = latent_vectors[idx]
@@ -689,6 +757,8 @@ class CoconutWrapper(LatentReasoningModel):
             position_ids_local = state["position_ids"]
             latent_lists_local = state["latent_lists"]
             inputs_embeds_local = state["inputs_embeds"]
+            bd_local = self._base_model_dtype()
+            inputs_embeds_local = inputs_embeds_local.to(dtype=bd_local)
             past_key_values_local = state["past_key_values"]
             next_compute_range_local = state["next_compute_range"]
             max_n_latents_local = state["max_n_latents"]
@@ -710,7 +780,10 @@ class CoconutWrapper(LatentReasoningModel):
                     if len(mask_list) > pass_idx_local
                 ]
                 latent_vectors = [
-                    h_t_mod[batch_idx].to(self.device) for batch_idx, _ in filling_indices
+                    h_t_mod[batch_idx].to(
+                        device=inputs_embeds_local.device, dtype=bd_local
+                    )
+                    for batch_idx, _ in filling_indices
                 ]
                 inputs_embeds_local = self._inject_latents(
                     inputs_embeds_local, filling_indices, latent_vectors
@@ -947,6 +1020,8 @@ class CoconutWrapper(LatentReasoningModel):
         position_ids = other_state["position_ids"]
         latent_lists = other_state["latent_lists"]
         inputs_embeds = other_state["inputs_embeds"]
+        bd = self._base_model_dtype()
+        inputs_embeds = inputs_embeds.to(dtype=bd)
         past_key_values = other_state["past_key_values"]
         next_compute_range = other_state["next_compute_range"]
         max_n_latents = other_state["max_n_latents"]
@@ -965,7 +1040,8 @@ class CoconutWrapper(LatentReasoningModel):
             if len(mask_list) > pass_idx
         ]
         latent_vectors = [
-            h_t_modified[batch_idx].to(self.device) for batch_idx, _ in filling_indices
+            h_t_modified[batch_idx].to(device=inputs_embeds.device, dtype=bd)
+            for batch_idx, _ in filling_indices
         ]
         inputs_embeds = self._inject_latents(
             inputs_embeds, filling_indices, latent_vectors
@@ -1131,6 +1207,8 @@ class CoconutWrapper(LatentReasoningModel):
         position_ids = other_state["position_ids"]
         latent_lists = other_state["latent_lists"]
         inputs_embeds = other_state["inputs_embeds"]
+        bd = self._base_model_dtype()
+        inputs_embeds = inputs_embeds.to(dtype=bd)
         past_key_values = other_state["past_key_values"]
         next_compute_range = other_state["next_compute_range"]
         max_n_latents = other_state["max_n_latents"]
@@ -1159,7 +1237,8 @@ class CoconutWrapper(LatentReasoningModel):
             if len(mask_list) > pass_idx
         ]
         latent_vectors = [
-            h_t_modified[batch_idx].to(self.device) for batch_idx, _ in filling_indices
+            h_t_modified[batch_idx].to(device=inputs_embeds.device, dtype=bd)
+            for batch_idx, _ in filling_indices
         ]
         inputs_embeds = self._inject_latents(
             inputs_embeds, filling_indices, latent_vectors
@@ -1255,7 +1334,9 @@ class CoconutWrapper(LatentReasoningModel):
         """Project a latent vector through the LM head (logit lens style)."""
         if not hasattr(self.base_model, "lm_head"):
             raise AttributeError("base_model lacks lm_head for logit lens.")
-        return self.base_model.lm_head(h_t)
+        head = self.base_model.lm_head
+        h = h_t.to(dtype=head.weight.dtype)
+        return head(h)
 
     def decode_from_state(
         self, h_t: torch.Tensor, other_state: Dict[str, Any]

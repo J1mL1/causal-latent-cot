@@ -11,9 +11,9 @@ export TOKENIZERS_PARALLELISM=false
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 
 # === Editable parameters ===
-CONDA_ENV="codi"
-CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
-NPROC=8          # >1 to enable torchrun
+CONDA_ENV="latentCoT"
+CUDA_VISIBLE_DEVICES="0,1,2,3"
+NPROC=4          # >1 to enable torchrun
 BATCH_SIZE=32
 NUM_WORKERS=8
 MASTER_PORT="${MASTER_PORT:-29500}"

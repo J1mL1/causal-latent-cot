@@ -350,7 +350,8 @@ def main() -> None:
             mode, step = ms
             key = (mode, step)
 
-            intervened_texts = (rec.get("intervened") or {}).get("text") or []
+            _iv = rec.get("intervened") or rec.get("ablated") or {}
+            intervened_texts = (_iv.get("text") if isinstance(_iv, dict) else []) or []
             if intervened_texts:
                 text_idx = batch_idx if isinstance(batch_idx, int) else 0
                 if text_idx < 0 or text_idx >= len(intervened_texts):

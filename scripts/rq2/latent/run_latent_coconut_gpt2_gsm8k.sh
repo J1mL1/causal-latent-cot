@@ -11,15 +11,18 @@ export TORCH_DISTRIBUTED_DEBUG=DETAIL
 # === Editable parameters ===
 CONDA_ENV="latentCoT"
 NPROC=4               # >1 to enable torchrun
-BATCH_SIZE=32
-NUM_WORKERS=0
+BATCH_SIZE=16
+NUM_WORKERS=8
 STEPS="1,2,3,4,5,6"
+MASTER_PORT="${MASTER_PORT:-29501}"
 DIST_URL="env://"
 DIST_BACKEND="nccl"
 CONFIG="configs/rq1/coconut/gpt2-gsm8k.yaml"
-OUTPUT="outputs/rq2/latent_graph/gsm8k_coconut_gpt2_latent_graph.jsonl"
-MODE="zero"
-INCLUDE_SELF="--include_self"
+OUTPUT="outputs/rq2/latent_graph/gsm8k_coconut_gpt2_latent_graph_gaussian_h.jsonl"
+MODE="gaussian_h"
+INCLUDE_SELF=""
+# Used only when MODE is mean/mean_step; in distributed mode rank0 writes, other ranks load.
+MEAN_CACHE="outputs/rq1/mean_latents/coconut_gpt2.pt"
 # ===========================
 
 export CUDA_VISIBLE_DEVICES
@@ -36,7 +39,7 @@ else
 fi
 
 if [ "${NPROC}" -gt 1 ]; then
-  LAUNCHER="torchrun --nproc_per_node=${NPROC}"
+  LAUNCHER="torchrun --nproc_per_node=${NPROC} --master_port=${MASTER_PORT}"
   DIST_FLAGS="--distributed --dist_url ${DIST_URL} --dist_backend ${DIST_BACKEND}"
 else
   LAUNCHER="python"
@@ -52,4 +55,5 @@ ${LAUNCHER} experiments/rq2/run_latent_causal_graph.py \
   ${INCLUDE_SELF} \
   --batch_size "${BATCH_SIZE}" \
   --num_workers "${NUM_WORKERS}" \
+  --mean_cache_path "${MEAN_CACHE}" \
   ${DIST_FLAGS}

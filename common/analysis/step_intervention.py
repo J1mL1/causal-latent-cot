@@ -62,31 +62,56 @@ def register_intervention(name: str, fn: Callable[..., torch.Tensor]) -> None:
     INTERVENTION_REGISTRY[name] = fn
 
 
-def estimate_global_mean_latent(
+def infer_latent_hidden_dim(model: Any) -> int:
+    """Resolve hidden size for stacking / reducing distributed mean accumulators."""
+    bm = getattr(model, "base_model", None)
+    if bm is not None and getattr(bm, "config", None) is not None:
+        hs = getattr(bm.config, "hidden_size", None)
+        if hs is not None:
+            return int(hs)
+    inner = getattr(model, "model", None)
+    if inner is not None:
+        dim_attr = getattr(inner, "dim", None)
+        if isinstance(dim_attr, int):
+            return int(dim_attr)
+        codi_lm = getattr(inner, "codi", None)
+        if codi_lm is not None and getattr(codi_lm, "config", None) is not None:
+            hs = getattr(codi_lm.config, "hidden_size", None)
+            if hs is not None:
+                return int(hs)
+        if getattr(inner, "config", None) is not None:
+            hs = getattr(inner.config, "hidden_size", None)
+            if hs is not None:
+                return int(hs)
+    raise RuntimeError(
+        "Cannot infer hidden_size for latent mean aggregation "
+        "(expected model.base_model.config.hidden_size, CODI model.dim / model.codi.config, etc.)."
+    )
+
+
+def estimate_global_mean_latent_accumulators(
     model: LatentReasoningModel,
     dataloader: Iterable[Any],
     max_steps: Optional[int] = None,
-) -> torch.Tensor:
+) -> Tuple[torch.Tensor, int]:
     """
-    Estimate dataset-level mean latent by averaging h_t across steps and samples.
+    Sum of h_t over all (sample, step) and total token count (float32 accumulation).
 
-    Args:
-        model: LatentReasoningModel implementing forward_until_step.
-        dataloader: Iterable yielding input batches for the model.
-        max_steps: Limit how many latent steps to aggregate per sample.
-
-    Returns:
-        mu: Tensor [d_model]
+    For distributed runs, each rank computes a partial (sums, count) and should
+    all-reduce sums and count before dividing.
     """
     if max_steps is not None and max_steps < 1:
         raise ValueError("max_steps must be >= 1 for mean latent estimation.")
 
-    sums: Optional[torch.Tensor] = None
-    count = 0
+    hidden_dim = infer_latent_hidden_dim(model)
     model_device = getattr(model, "device", torch.device("cpu"))
+    sums = torch.zeros(hidden_dim, dtype=torch.float32, device=model_device)
+    count = 0
 
     with torch.no_grad():
-        for batch_idx, batch in enumerate(dataloader):
+        for batch_idx, batch in enumerate(
+            tqdm(dataloader, desc="estimate_global_mean_latent", leave=False)
+        ):
             samples = batch if isinstance(batch, list) else [batch]
             steps = (
                 range(1, max_steps + 1)
@@ -103,26 +128,20 @@ def estimate_global_mean_latent(
                             break
                         continue
                     h_t = h_t.detach().to(model_device)
-                    if sums is None:
-                        sums = torch.zeros_like(h_t[0])
-                    sums = sums + h_t.sum(dim=0)
+                    row_sum = h_t.sum(dim=0).float()
+                    sums = sums + row_sum
                     count += h_t.size(0)
 
-    if sums is None or count == 0:
-        raise RuntimeError("Failed to estimate global mean latent; no states collected.")
-
-    mu = sums / float(count)
-    return mu
+    return sums, count
 
 
-def estimate_step_mean_latents(
+def estimate_global_mean_latent(
     model: LatentReasoningModel,
     dataloader: Iterable[Any],
     max_steps: Optional[int] = None,
-    include_start: bool = False,
-) -> Dict[int, torch.Tensor]:
+) -> torch.Tensor:
     """
-    Estimate per-step mean latents: {step: mu_step}.
+    Estimate dataset-level mean latent by averaging h_t across steps and samples.
 
     Args:
         model: LatentReasoningModel implementing forward_until_step.
@@ -130,7 +149,24 @@ def estimate_step_mean_latents(
         max_steps: Limit how many latent steps to aggregate per sample.
 
     Returns:
-        Dict mapping step index to mean vector [d_model].
+        mu: Tensor [d_model]
+    """
+    sums, count = estimate_global_mean_latent_accumulators(model, dataloader, max_steps)
+    if count == 0:
+        raise RuntimeError("Failed to estimate global mean latent; no states collected.")
+
+    mu = (sums / float(count)).to(dtype=torch.float32)
+    return mu
+
+
+def estimate_step_mean_latents_accumulators(
+    model: LatentReasoningModel,
+    dataloader: Iterable[Any],
+    max_steps: Optional[int] = None,
+    include_start: bool = False,
+) -> Tuple[Dict[int, torch.Tensor], Dict[int, int]]:
+    """
+    Per-step sums and counts of h_t for later averaging or distributed all-reduce.
     """
     if max_steps is not None and max_steps < 1:
         raise ValueError("max_steps must be >= 1 for per-step mean estimation.")
@@ -157,16 +193,40 @@ def estimate_step_mean_latents(
                             break
                         continue
                     h_t = h_t.detach().to(model_device)
+                    row_sum = h_t.sum(dim=0).float()
                     if step not in sums:
-                        sums[step] = torch.zeros_like(h_t[0])
+                        sums[step] = torch.zeros_like(row_sum, dtype=torch.float32, device=row_sum.device)
                         counts[step] = 0
-                    sums[step] = sums[step] + h_t.sum(dim=0)
+                    sums[step] = sums[step] + row_sum
                     counts[step] += h_t.size(0)
 
+    return sums, counts
+
+
+def estimate_step_mean_latents(
+    model: LatentReasoningModel,
+    dataloader: Iterable[Any],
+    max_steps: Optional[int] = None,
+    include_start: bool = False,
+) -> Dict[int, torch.Tensor]:
+    """
+    Estimate per-step mean latents: {step: mu_step}.
+
+    Args:
+        model: LatentReasoningModel implementing forward_until_step.
+        dataloader: Iterable yielding input batches for the model.
+        max_steps: Limit how many latent steps to aggregate per sample.
+
+    Returns:
+        Dict mapping step index to mean vector [d_model].
+    """
+    sums, counts = estimate_step_mean_latents_accumulators(
+        model, dataloader, max_steps=max_steps, include_start=include_start
+    )
     if not sums:
         raise RuntimeError("Failed to estimate per-step means; no states collected.")
 
-    mu_by_step = {step: sums[step] / float(counts[step]) for step in sums}
+    mu_by_step = {step: (sums[step] / float(counts[step])).to(dtype=torch.float32) for step in sums}
     return mu_by_step
 
 

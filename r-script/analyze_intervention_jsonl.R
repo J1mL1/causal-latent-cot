@@ -92,11 +92,11 @@ df <- df %>%
     gold_is_choice = grepl("^[A-E]$", as.character(gold_answer)),
     gold = sapply(gold_answer, parse_gold),
     baseline_text = {
-      b_list <- to_list_col(baseline, nrow(df))
+      b_list <- to_list_col(df[["baseline"]], nrow(df))
       vapply(seq_len(nrow(df)), function(i) get_text_field(b_list[[i]], batch_idx[[i]]), character(1))
     },
     intervened_text = {
-      a_list <- to_list_col(intervened, nrow(df))
+      a_list <- to_list_col(get_intervened_column_df(df), nrow(df))
       vapply(seq_len(nrow(df)), function(i) get_text_field(a_list[[i]], batch_idx[[i]]), character(1))
     },
     gold_choice = ifelse(gold_is_choice, as.character(gold_answer), NA_character_),
