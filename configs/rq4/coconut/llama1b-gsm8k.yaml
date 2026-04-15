@@ -1,0 +1,34 @@
+# RQ4 Patchscope — Coconut Llama 3.2 1B on GSM8K.
+model:
+  device: "cuda"
+  base_model_name_or_path: "${MODEL_DIR}/Llama-3.2-1B-Instruct"
+  tokenizer_name_or_path: "${MODEL_DIR}/Llama-3.2-1B-Instruct"
+  checkpoint_path: "${PROJECT_ROOT}/models/coconut_reproduction/gsm-coconut-llama3.2-1b-instruct/checkpoint_5"
+  add_latent_tokens: true
+  start_latent_token_str: "<|start-latent|>"
+  end_latent_token_str: "<|end-latent|>"
+  latent_token_str: "<|latent|>"
+  latent_init_token: "<<"
+  num_latent_placeholders: 6
+  teacher_target_template: "### {answer}"
+  use_coconut_question_only: true
+  align_latent_padding: true
+generation_kwargs:
+  max_new_tokens: 128
+  temperature: 1.0
+dataset_name: gsm8k
+dataset_path: "data/gsm8k_local.jsonl"
+prompt_template: "Question: {question}\nAnswer:"
+steps: "1,2,3,4,5,6"
+max_mean_steps: 6
+
+patchscope:
+  target_template: |
+    Comparing two quantities -> Comparing two quantities before combining them.
+    An intermediate value -> An intermediate value in a multi-step reasoning step.
+    ?
+  placeholder: "?"
+  skip_final_ln: true
+  max_new_tokens: 48
+  include_baseline: true
+  gold_cot_split: line

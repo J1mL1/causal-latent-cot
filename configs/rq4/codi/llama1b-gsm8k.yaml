@@ -1,8 +1,9 @@
+# RQ4 Patchscope — CODI Llama 3.2 1B on GSM8K (same as RQ1 codi/llama1b-gsm8k).
 model:
   device: "cuda"
   model_args:
-    model_name_or_path: "models/gpt2"
-    ckpt_dir: "${PROJECT_ROOT}/models/sim-cot-gpt2-codi"
+    model_name_or_path: "${MODEL_DIR}/Llama-3.2-1B-Instruct"
+    ckpt_dir: "${PROJECT_ROOT}/models/CODI-llama3.2-1b-Instruct"
     lora_r: 128
     lora_alpha: 32
     lora_dropout: 0.1
@@ -13,16 +14,16 @@ model:
     inf_latent_iterations: 6
     use_lora: true
     use_prj: true
-    prj_dim: 768
+    prj_dim: 2048
     prj_dropout: 0.0
     prj_no_ln: false
     remove_eos: true
     greedy: true
-    output_dir: "./outputs/simcot_codi_gpt2"
+    output_dir: "./outputs/codi_llama"
     per_device_train_batch_size: 128
     per_device_eval_batch_size: 128
     bf16: false
-  tokenizer_name_or_path: "${PROJECT_ROOT}/models/sim-cot-codi-gpt2"
+  tokenizer_name_or_path: "${MODEL_DIR}/Llama-3.2-1B-Instruct"
   generation_kwargs:
     max_new_tokens: 256
     temperature: 0.1
@@ -30,8 +31,19 @@ model:
     top_p: 0.95
     greedy: true
   teacher_target_template: "The answer is: {answer}"
-dataset_name: null
+dataset_name: gsm8k
 dataset_path: "data/gsm8k_local.jsonl"
 prompt_template: "Question: {question}\nAnswer:"
 steps: "1,2,3,4,5,6"
 max_mean_steps: 6
+
+patchscope:
+  target_template: |
+    Comparing two quantities -> Comparing two quantities before combining them.
+    An intermediate value -> An intermediate value in a multi-step reasoning step.
+    ?
+  placeholder: "?"
+  skip_final_ln: true
+  max_new_tokens: 48
+  include_baseline: true
+  gold_cot_split: line

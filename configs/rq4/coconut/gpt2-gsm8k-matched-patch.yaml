@@ -1,0 +1,27 @@
+# RQ4 matched arithmetic patch pilot — Coconut GPT-2 on GSM8K (same checkpoint as RQ4 patchscope).
+model:
+  device: "cuda"
+  base_model_name_or_path: "${MODEL_DIR}/gpt2"
+  tokenizer_name_or_path: "${MODEL_DIR}/gpt2"
+  checkpoint_path: "${PROJECT_ROOT}/models/coconut_reproduction/gsm-coconut-gpt2/checkpoint_24"
+  add_latent_tokens: true
+  start_latent_token_str: "<|start-latent|>"
+  end_latent_token_str: "<|end-latent|>"
+  latent_token_str: "<|latent|>"
+  latent_init_token: "<<"
+  num_latent_placeholders: 6
+  teacher_target_template: "### {answer}"
+  use_coconut_question_only: true
+  align_latent_padding: true
+generation_kwargs:
+  max_new_tokens: 64
+  temperature: 1.0
+dataset_name: gsm8k
+dataset_path: "data/gsm8k_local.jsonl"
+prompt_template: "Question: {question}\nAnswer:"
+steps: "1,2,3,4,5,6"
+max_mean_steps: 6
+
+matched_patch:
+  # Default if CLI --steps omitted (run_matched_patch_coconut_gpt2_gsm8k.sh passes 1–6)
+  latent_steps: [1, 2, 3, 4, 5, 6]

@@ -14,8 +14,19 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 _SIM_CODI_SRC = REPO_ROOT / "external" / "sim-cot" / "CODI" / "src"
 
 
-def _load_codi_checkpoint_state(ckpt_dir: str) -> Dict[str, Any]:
-    """Load CODI weights from common layouts (including HF sharded safetensors filenames)."""
+def _load_codi_checkpoint_into_model(model: Any, ckpt_dir: str) -> None:
+    """Load CODI weights from single-file or HF-sharded checkpoint layouts."""
+    index_path = os.path.join(ckpt_dir, "model.safetensors.index.json")
+    if os.path.isfile(index_path):
+        from transformers.modeling_utils import load_sharded_checkpoint
+
+        try:
+            load_sharded_checkpoint(model, ckpt_dir, strict=False, prefer_safe=True)
+        except TypeError:
+            # Older Transformers versions do not expose prefer_safe.
+            load_sharded_checkpoint(model, ckpt_dir, strict=False)
+        return
+
     candidates = [
         os.path.join(ckpt_dir, "model.safetensors"),
         os.path.join(ckpt_dir, "model-00001-of-00001.safetensors"),
@@ -27,11 +38,15 @@ def _load_codi_checkpoint_state(ckpt_dir: str) -> Dict[str, Any]:
         if path.endswith(".safetensors"):
             from safetensors.torch import load_file
 
-            return load_file(path)
-        return torch.load(path, map_location="cpu")
+            state_dict = load_file(path)
+        else:
+            state_dict = torch.load(path, map_location="cpu")
+        model.load_state_dict(state_dict, strict=False)
+        return
     raise FileNotFoundError(
         f"No CODI checkpoint file in {ckpt_dir} (tried model.safetensors, "
-        "model-00001-of-00001.safetensors, pytorch_model.bin)."
+        "model-00001-of-00001.safetensors, pytorch_model.bin, "
+        "model.safetensors.index.json)."
     )
 
 
@@ -109,8 +124,7 @@ class SimCodiWrapper(CodiWrapper):
         )
         self.model.to(self.device)
         if model_args.ckpt_dir:
-            state_dict = _load_codi_checkpoint_state(model_args.ckpt_dir)
-            self.model.load_state_dict(state_dict, strict=False)
+            _load_codi_checkpoint_into_model(self.model, model_args.ckpt_dir)
         if train_args.use_prj and hasattr(self.model, "prj"):
             _prj_dtype = self.model.get_embd(self.model.codi, self.model.model_name).weight.dtype
             self.model.prj.to(dtype=_prj_dtype)

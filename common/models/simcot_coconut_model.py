@@ -16,6 +16,18 @@ _SIM_COCONUT_DIR = REPO_ROOT / "external" / "sim-cot" / "Coconut"
 
 def _import_simcot_coconut_modules():
     """Import Sim-CoT fork modules (standalone `coconut.py` + `utils.py` under external/sim-cot/Coconut)."""
+    coconut_py = _SIM_COCONUT_DIR / "coconut.py"
+    utils_py = _SIM_COCONUT_DIR / "utils.py"
+    if not coconut_py.exists() or not utils_py.exists():
+        raise ModuleNotFoundError(
+            "Missing Sim-CoT Coconut sources. Expected files:\n"
+            f"  - {coconut_py}\n"
+            f"  - {utils_py}\n\n"
+            "This model wrapper expects the Sim-CoT fork's `Coconut/` directory to be present at:\n"
+            f"  {_SIM_COCONUT_DIR}\n"
+            "Please fetch/clone the Sim-CoT repository (or its Coconut subdir) into "
+            "`external/sim-cot/`, so that `coconut.py` and `utils.py` exist there."
+        )
     d = str(_SIM_COCONUT_DIR)
     if d not in sys.path:
         sys.path.insert(0, d)

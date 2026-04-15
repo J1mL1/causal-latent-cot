@@ -2,7 +2,7 @@ model:
   device: "cuda"
   base_model_name_or_path: "models/gpt2"
   tokenizer_name_or_path: "models/gpt2"
-  checkpoint_path: "${PROJECT_ROOT}/models/sim-cot-coconut-gpt2/checkpoint_28"
+  checkpoint_path: "${PROJECT_ROOT}/models/sim-cot-gpt2-coconut/checkpoint_28"
   add_latent_tokens: true
   start_latent_token_str: "<|start-latent|>"
   end_latent_token_str: "<|end-latent|>"
