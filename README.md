@@ -14,11 +14,10 @@ This repository contains the code, experiment configurations, preprocessing util
 
 ## Latest Updates
 
-🔥 May 01, 2026: Our paper was accepted to the ICML 2026!!!
-🔥 Mar 12, 2026: Our GitHub repo is online!
-🔥 Mar 01, 2026: The paper was accepted to the ICLR 2026 workshop [Latent & Implicit Thinking - Going Beyond CoT Reasoning](https://latent-implicit-thinking.github.io/). OpenReview discussion: [9rBJRME17M](https://openreview.net/forum?id=9rBJRME17M#discussion).
-🔥 Feb 09, 2026: The paper was released on arXiv: [Dynamics Within Latent Chain-of-Thought: An Empirical Study of Causal Structure](https://arxiv.org/abs/2602.08783).
-
+`🔥 May 01, 2026:` Our paper was accepted to the **ICML 2026**!!!  
+`🔥 Mar 12, 2026:` Our GitHub repo is online!  
+`🔥 Mar 01, 2026:` The paper was accepted to the **ICLR 2026 workshop [Latent & Implicit Thinking - Going Beyond CoT Reasoning](https://latent-implicit-thinking.github.io/)**. OpenReview discussion: [9rBJRME17M](https://openreview.net/forum?id=9rBJRME17M#discussion).  
+`🔥 Feb 09, 2026:` The paper was released on arXiv: [Dynamics Within Latent Chain-of-Thought: An Empirical Study of Causal Structure](https://arxiv.org/abs/2602.08783).  
 
 ## Repository Structure
 
