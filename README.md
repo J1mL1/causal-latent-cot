@@ -192,13 +192,11 @@ For questions about the code, experiments, or reproduction:
 If you use this repository, please cite the paper:
 
 ```bibtex
-@misc{li2026dynamicslatentchainofthoughtempirical,
-      title={Dynamics Within Latent Chain-of-Thought: An Empirical Study of Causal Structure}, 
-      author={Zirui Li and Xuefeng Bai and Kehai Chen and Yizhi Li and Jian Yang and Chenghua Lin and Min Zhang},
-      year={2026},
-      eprint={2602.08783},
-      archivePrefix={arXiv},
-      primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2602.08783}, 
+@inproceedings{li2026dynamics,
+  title     = {Dynamics Within Latent Chain-of-Thought: An Empirical Study of Causal Structure},
+  author    = {Li, Zirui and Bai, Xuefeng and Chen, Kehai and Li, Yizhi and Yang, Jian and Lin, Chenghua and Zhang, Min},
+  booktitle = {Proceedings of the 43rd International Conference on Machine Learning},
+  year      = {2026},
+  address   = {Seoul, South Korea},
 }
 ```
