@@ -195,7 +195,8 @@ If you use this repository, please cite the paper:
 @inproceedings{li2026dynamics,
   title     = {Dynamics Within Latent Chain-of-Thought: An Empirical Study of Causal Structure},
   author    = {Li, Zirui and Bai, Xuefeng and Chen, Kehai and Li, Yizhi and Yang, Jian and Lin, Chenghua and Zhang, Min},
-  booktitle = {Proceedings of the 43rd International Conference on Machine Learning},
+  booktitle = {Forty-third International Conference on Machine Learning},
+  url       = {https://openreview.net/forum?id=kHB8m3ojGe}
   year      = {2026},
   address   = {Seoul, South Korea},
 }
